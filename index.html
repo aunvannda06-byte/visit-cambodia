@@ -1460,7 +1460,8 @@ function bumpAIGuideGuestUsage() {
 }
 let favourites = JSON.parse(localStorage.getItem('fav_cambodia') || '[]');
 let tripPlaces = JSON.parse(localStorage.getItem('trip_places_cambodia') || '[]'); // places saved via "Save to My Trip"
-let ratingsCache = JSON.parse(localStorage.getItem('ratings_cambodia') || '{}'); // {key:{avg,count}} synced from the Ratings sheet
+function normalizeRatingKeys(obj) { const out = {}; Object.keys(obj || {}).forEach(k => { out[toKey(k)] = obj[k]; }); return out; }
+let ratingsCache = normalizeRatingKeys(JSON.parse(localStorage.getItem('ratings_cambodia') || '{}')); // {key:{avg,count}} synced from the Ratings sheet
 let myRatingsCache = JSON.parse(localStorage.getItem('my_ratings_cambodia') || '{}'); // {key:stars} — what THIS rater has given, remembered on this device
 let adminSession = JSON.parse(localStorage.getItem('admin_session_cambodia') || 'null'); // {token, username, fullName}
 let userSession = JSON.parse(localStorage.getItem('user_session_cambodia') || 'null'); // {token, email, name, picture} — signed in with Google
@@ -1709,6 +1710,8 @@ async function loadRemoteContent() {
                     desc: row.Desc || '', _id: row.ID
                 });
             });
+            remoteLocationsLoaded = true;
+            savePinCache();
         }
         if (evRes && evRes.success && Array.isArray(evRes.data)) {
             evRes.data.forEach(row => {
@@ -1960,6 +1963,7 @@ function submitAddLocation() {
                 if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest }); }
                 else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, _id: res.id });
                 if (pinDest) LOCATIONS.forEach(x => { if (x.province === province && x.name !== name) x.pinDest = false; });
+                savePinCache();
                 closeAdminContentModal();
                 exPage = 1;
                 render();
@@ -2143,7 +2147,7 @@ function saveMyRatings() {
 }
 function loadRatings() {
     return fetchBackendGet('getRatings').then(res => {
-        if (res && res.success && res.data) { ratingsCache = res.data; localStorage.setItem('ratings_cambodia', JSON.stringify(ratingsCache)); }
+        if (res && res.success && res.data) { ratingsCache = normalizeRatingKeys(res.data); localStorage.setItem('ratings_cambodia', JSON.stringify(ratingsCache)); }
     }).catch(() => {});
 }
 // Small read-only "★ 4.8 (24)" badge used on cards.
@@ -2244,10 +2248,19 @@ function destinationList() {
     LOCATIONS.forEach(l => { if (l.pinDest && l.province && !DESTINATION_PROVINCES.includes(l.province) && !extra.includes(l.province)) extra.push(l.province); });
     return DESTINATION_PROVINCES.concat(extra);
 }
+let pinPhotoCache = JSON.parse(localStorage.getItem('dest_pins_cambodia') || '{}'); // {province: photo}
+let remoteLocationsLoaded = false;
+function savePinCache() {
+    const m = {};
+    LOCATIONS.forEach(l => { if (l.pinDest && l.province && l.photos && l.photos.length) m[l.province] = l.photos[0]; });
+    pinPhotoCache = m;
+    try { localStorage.setItem('dest_pins_cambodia', JSON.stringify(m)); } catch (e) {}
+}
 function destinationPhoto(prov) {
     const list = LOCATIONS.filter(l => l.province === prov && l.photos && l.photos.length);
     const pinned = list.find(l => l.pinDest);
     if (pinned) return pinned.photos[0];
+    if (!remoteLocationsLoaded && pinPhotoCache[prov]) return pinPhotoCache[prov];
     const best = list.find(l => l.category === 'Things to do' || l.category === 'Temple') || list[0];
     return best ? best.photos[0] : '';
 }
@@ -4744,7 +4757,7 @@ async function openDetails(name) {
 
     const renderTabStrip = () => `
         <div class="flex items-center gap-6 border-b border-slate-100 mb-5">
-            ${[['about','About'],['reviews','Reviews'],['tips','Tips'],['nearby','Nearby']].map(([id,label])=>`
+            ${[['about','About'],['reviews','Reviews'],['tips','Tips'],['nearby','Nearby']].filter(([id])=>id!=='reviews' || isAdmin()).map(([id,label])=>`
                 <button onclick="window.detailSetTab('${id}')" class="pb-3 text-[12px] font-black transition-all ${dTab===id?'text-sky-700 border-b-2 border-sky-700':'text-slate-400'}">${label}</button>
             `).join('')}
         </div>`;
@@ -4798,7 +4811,7 @@ async function openDetails(name) {
         </div>`;
 
     const renderModal = () => {
-        const tabContent = dTab==='reviews' ? renderReviewsTab() : dTab==='tips' ? renderTipsTab() : dTab==='nearby' ? renderNearbyTab() : renderAboutTab();
+        const tabContent = (dTab==='reviews' && isAdmin()) ? renderReviewsTab() : dTab==='tips' ? renderTipsTab() : dTab==='nearby' ? renderNearbyTab() : renderAboutTab();
         body.innerHTML = `
             <div class="relative h-72 overflow-hidden">
                 <img src="${loc.photos[idx]}" class="w-full h-full object-cover fit-full transition-opacity duration-300">
