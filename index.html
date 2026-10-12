@@ -127,6 +127,15 @@
             #trend-sec-shorts { margin-top:36px; }
             #trend-shorts { grid-template-columns:repeat(4,minmax(0,1fr)) !important; column-gap:20px !important; row-gap:24px !important; }
         }
+        /* Trending player: 9:16 videos fit one phone screen; "Show full length" expands them */
+        #yt-wrap { position:relative; margin:0 auto; border-radius:16px; background:#000; overflow:hidden; }
+        #yt-wrap.vw-wide { aspect-ratio:16/9; width:100%; max-height:calc(100vh - 170px); max-height:calc(100dvh - 170px); }
+        #yt-wrap.vw-short { aspect-ratio:9/16; width:min(100%, calc((100vh - 260px) * 9 / 16)); width:min(100%, calc((100dvh - 260px) * 9 / 16)); }
+        #yt-wrap.vw-short.vw-exp { width:min(100%, 420px); }
+        #yt-wrap.vw-short.vw-exp.vw-tt { aspect-ratio:325/739; }
+        #yt-inner { position:absolute; left:0; top:0; width:100%; height:100%; }
+        #yt-inner.tt { width:325px; height:739px; transform-origin:0 0; }
+        #yt-inner iframe { display:block; width:100%; height:100%; border:0; }
     </style>
 </head>
 <body class="flex justify-center">
@@ -178,8 +187,8 @@
 
 
 <!-- Video Player Modal (Trending) -->
-<div id="video-modal" class="fixed inset-0 bg-black/80 z-[2700] hidden flex items-center justify-center p-4" onclick="closeVideoModal()">
-    <div class="w-full max-w-md" onclick="event.stopPropagation()">
+<div id="video-modal" class="fixed inset-0 bg-black/80 z-[2700] hidden flex items-start justify-center p-4 overflow-y-auto" onclick="closeVideoModal()">
+    <div class="w-full max-w-md my-auto" onclick="event.stopPropagation()">
         <div id="video-modal-body"></div>
     </div>
 </div>
@@ -2030,7 +2039,7 @@ function openAddEventForm(edit) {
         set('ev-date-from', edit.dateFrom); set('ev-date-to', edit.dateTo);
         (edit.photos || []).forEach((u, i) => { if (i > 0) addEvPhotoInput(); set('ev-photo-url-' + i, u); });
     }
-    openAdminContentModal();
+    openAdminContentModal(true);
 }
 
 function submitAddEvent() {
@@ -2651,14 +2660,11 @@ function openVideo(id) {
             <h3 class="text-white font-black text-sm leading-snug">${escHtml(v.name)}</h3>
             <button onclick="closeVideoModal()" class="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-xmark text-white"></i></button>
         </div>
-        <div id="yt-wrap" class="relative rounded-2xl bg-black" style="${p.short
-            ? 'aspect-ratio:9/16;width:min(100%,calc((100vh - 170px)*9/16));width:min(100%,calc((100dvh - 170px)*9/16));margin:0 auto'
-            : 'aspect-ratio:16/9;width:100%;max-height:calc(100vh - 170px);max-height:calc(100dvh - 170px);margin:0 auto'};overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain">
-            <div class="relative w-full" style="aspect-ratio:${p.type==='tiktok' ? '9/20' : (p.short ? '9/16' : '16/9')}">
-                <iframe src="${escHtml(p.embedUrl)}" class="absolute inset-0 w-full h-full" style="border:0" scrolling="no" frameborder="0" allowfullscreen
-                    allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
-            </div>
+        <div id="yt-wrap" class="${p.short ? 'vw-short' : 'vw-wide'}${p.type==='tiktok' ? ' vw-tt' : ''}">
+            <div id="yt-inner" class="${p.type==='tiktok' ? 'tt' : ''}">${p.type==='tiktok' ? '' : `<iframe src="${escHtml(p.embedUrl)}" scrolling="no" frameborder="0" allowfullscreen
+                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>`}</div>
         </div>
+        ${p.short ? `<button id="vid-expand-btn" onclick="toggleVideoExpand()" class="w-full h-11 mt-3 rounded-2xl bg-white/15 text-white text-[12px] font-black flex items-center justify-center gap-2 active:scale-95 transition-all"><i class="fa-solid fa-up-right-and-down-left-from-center"></i><span>Show full length</span></button>` : ''}
         <div class="flex items-center justify-between gap-3 mt-3">
             <p class="text-white/60 text-[11px] font-semibold truncate">${escHtml(v.province)}${v.province && v.category ? ' • ' : ''}${escHtml(v.category)}</p>
             <a href="${escHtml(p.watchUrl)}" target="_blank" rel="noopener" class="text-[11px] font-black text-white bg-white/15 px-3 py-2 rounded-xl flex-shrink-0"><i class="fa-brands ${pl.icon} mr-1"></i>Watch on ${pl.label}</a>
@@ -2666,6 +2672,8 @@ function openVideo(id) {
     `;
     document.getElementById('video-modal').classList.remove('hidden');
     pushModalHistory();
+    if (p.type === 'tiktok') mountTikTok(p);
+    watchVideoBox();
     // Count one view per device per video
     let seen = false;
     try { seen = !!localStorage.getItem('sv_video_' + v.id); if (!seen) localStorage.setItem('sv_video_' + v.id, '1'); } catch (e) {}
@@ -2675,7 +2683,45 @@ function openVideo(id) {
         callBackend('viewVideo', { id: v.id }).catch(() => {});
     }
 }
+// TikTok: use TikTok's official embed (blockquote + embed.js), drawn at its natural 325px width and zoomed to fit the box.
+function mountTikTok(p) {
+    const host = document.getElementById('yt-inner');
+    if (!host) return;
+    host.innerHTML = `<blockquote class="tiktok-embed" cite="${escHtml(p.url)}" data-video-id="${escHtml(p.id)}" style="max-width:605px;min-width:325px;margin:0"><section></section></blockquote>`;
+    document.querySelectorAll('script[data-tt-embed]').forEach(x => x.remove());
+    const sc = document.createElement('script');
+    sc.async = true; sc.setAttribute('data-tt-embed', '1');
+    sc.src = 'https://www.tiktok.com/embed.js?_=' + Date.now();
+    document.body.appendChild(sc);
+    // If TikTok does not draw the player, say so and keep the "Watch on TikTok" button as the way out
+    setTimeout(() => {
+        const h = document.getElementById('yt-inner');
+        if (h && !h.querySelector('iframe')) h.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#fff;font-size:12px;font-weight:600">TikTok could not load here. Please use "Watch on TikTok".</div>';
+    }, 9000);
+}
+let vidBoxObserver = null;
+function fitVideoBox() {
+    const wrap = document.getElementById('yt-wrap'), inner = document.getElementById('yt-inner');
+    if (!wrap || !inner || !inner.classList.contains('tt')) return;
+    inner.style.transform = 'scale(' + (wrap.clientWidth / 325) + ')';
+}
+function watchVideoBox() {
+    if (vidBoxObserver) { vidBoxObserver.disconnect(); vidBoxObserver = null; }
+    const wrap = document.getElementById('yt-wrap');
+    if (!wrap) return;
+    fitVideoBox();
+    if (window.ResizeObserver) { vidBoxObserver = new ResizeObserver(fitVideoBox); vidBoxObserver.observe(wrap); }
+}
+function toggleVideoExpand() {
+    const wrap = document.getElementById('yt-wrap'), btn = document.getElementById('vid-expand-btn');
+    if (!wrap) return;
+    const on = wrap.classList.toggle('vw-exp');
+    if (btn) btn.querySelector('span').textContent = on ? 'Fit to screen' : 'Show full length';
+    fitVideoBox();
+    if (on) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 function closeVideoModal() {
+    if (vidBoxObserver) { vidBoxObserver.disconnect(); vidBoxObserver = null; }
     destroyYtPlayer();
     document.getElementById('video-modal').classList.add('hidden');
     document.getElementById('video-modal-body').innerHTML = '';
@@ -2726,7 +2772,7 @@ function openAddVideoForm(edit) {
         document.querySelector('#admin-content-modal-body h3').lastChild.textContent = 'Edit Video';
         set('vid-name', edit.name); set('vid-category', edit.category); set('vid-province', edit.province); set('vid-url', edit.url); set('vid-thumb', edit.thumbnail);
     }
-    openAdminContentModal();
+    openAdminContentModal(true);
 }
 function submitVideo() {
     const name = document.getElementById('vid-name').value.trim();
