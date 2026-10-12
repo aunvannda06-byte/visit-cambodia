@@ -199,7 +199,7 @@
 </div>
 
 <!-- Admin Content Modal (Add Location / Add Event) -->
-<div id="admin-content-modal" class="fixed inset-0 bg-black/60 z-[2600] hidden flex items-end justify-center" onclick="closeAdminContentModal()">
+<div id="admin-content-modal" class="fixed inset-0 bg-black/60 z-[2600] hidden flex items-end justify-center" onclick="if(!adminModalLock) closeAdminContentModal()">
     <div class="bg-white w-full max-w-md rounded-t-[35px] overflow-y-auto max-h-[92vh] modal-animate" onclick="event.stopPropagation()">
         <div id="admin-content-modal-body" class="pb-10"></div>
     </div>
@@ -1755,7 +1755,8 @@ function adminDelete(kind, id) {
 }
 
 // ===== ADMIN: ADD LOCATION / ADD EVENT FORMS =====
-function openAdminContentModal() { document.getElementById('admin-content-modal').classList.remove('hidden'); pushModalHistory(); }
+let adminModalLock = false; // true while the Add / Edit Location form is open: only the X button or Back closes it
+function openAdminContentModal(lock) { adminModalLock = !!lock; document.getElementById('admin-content-modal').classList.remove('hidden'); pushModalHistory(); }
 function closeAdminContentModal() { document.getElementById('admin-content-modal').classList.add('hidden'); popModalHistory(); }
 
 let photoInputCount = 1;
@@ -1925,7 +1926,7 @@ function openAddLocationForm(edit) {
         if (m) { set('loc-open-from', m[1].padStart(5, '0')); set('loc-open-to', m[2].padStart(5, '0')); }
         (edit.photos || []).filter(u => !isPlaceholderPhoto(u)).forEach((u, i) => { if (i > 0) addPhotoInput(); set('photo-url-' + i, u); });
     }
-    openAdminContentModal();
+    openAdminContentModal(true);
 }
 
 function submitAddLocation() {
@@ -2650,9 +2651,13 @@ function openVideo(id) {
             <h3 class="text-white font-black text-sm leading-snug">${escHtml(v.name)}</h3>
             <button onclick="closeVideoModal()" class="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-xmark text-white"></i></button>
         </div>
-        <div id="yt-wrap" class="relative w-full rounded-2xl overflow-hidden bg-black" style="${p.short ? 'aspect-ratio:9/16;width:min(100%,calc(78vh*9/16));margin:0 auto' : 'aspect-ratio:16/9'}">
-            <iframe src="${escHtml(p.embedUrl)}" class="absolute inset-0 w-full h-full" style="border:0" scrolling="no" frameborder="0" allowfullscreen
-                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div id="yt-wrap" class="relative rounded-2xl bg-black" style="${p.short
+            ? 'aspect-ratio:9/16;width:min(100%,calc((100vh - 170px)*9/16));width:min(100%,calc((100dvh - 170px)*9/16));margin:0 auto'
+            : 'aspect-ratio:16/9;width:100%;max-height:calc(100vh - 170px);max-height:calc(100dvh - 170px);margin:0 auto'};overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain">
+            <div class="relative w-full" style="aspect-ratio:${p.type==='tiktok' ? '9/20' : (p.short ? '9/16' : '16/9')}">
+                <iframe src="${escHtml(p.embedUrl)}" class="absolute inset-0 w-full h-full" style="border:0" scrolling="no" frameborder="0" allowfullscreen
+                    allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+            </div>
         </div>
         <div class="flex items-center justify-between gap-3 mt-3">
             <p class="text-white/60 text-[11px] font-semibold truncate">${escHtml(v.province)}${v.province && v.category ? ' • ' : ''}${escHtml(v.category)}</p>
