@@ -1705,6 +1705,7 @@ async function loadRemoteContent() {
                     latitude: parseFloat(row.Latitude), longitude: parseFloat(row.Longitude),
                     price: row.Price || '', openHours: row.OpenHours || '',
                     photos: Array.isArray(row.Photos) ? row.Photos.map(resolvePhoto) : [],
+                    pinDest: String(row.PinDest || '').toLowerCase() === 'yes',
                     desc: row.Desc || '', _id: row.ID
                 });
             });
@@ -1897,6 +1898,11 @@ function openAddLocationForm(edit) {
                 <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Description</label>
                 <textarea id="loc-desc" rows="4" class="w-full mt-1 p-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-medium text-slate-700 outline-none focus:border-sky-600 resize-none" placeholder="Short description..."></textarea>
             </div>
+            <label class="flex items-start gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-100 cursor-pointer">
+                <input type="checkbox" id="loc-pin" class="mt-1 w-5 h-5 accent-sky-700">
+                <span><span class="block text-[12px] font-black text-slate-700"><i class="fa-solid fa-thumbtack text-sky-700 mr-1"></i>Pin Destination</span>
+                <span class="block text-[11px] font-medium text-slate-400 mt-0.5">Use this photo as the picture of its province in "Explore by Destination" (Home)</span></span>
+            </label>
             <div>
                 <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Admin Rating <span class="normal-case font-medium">— places with more stars appear first in Explore</span></label>
                 <div id="loc-rating-stars" class="flex gap-2 mt-2 ml-1"></div>
@@ -1906,6 +1912,7 @@ function openAddLocationForm(edit) {
         </div>
     `;
     renderLocRatingStars();
+    if (edit) { const pc = document.getElementById('loc-pin'); if (pc) pc.checked = !!edit.pinDest; }
     if (edit) {
         const set = (id, v) => { document.getElementById(id).value = v == null ? '' : v; };
         document.querySelector('#admin-content-modal-body h3').lastChild.textContent = 'Edit Location';
@@ -1931,6 +1938,7 @@ function submitAddLocation() {
     const desc = document.getElementById('loc-desc').value.trim();
     let photos = Array.from(document.querySelectorAll('[id^="photo-url-"]')).map(el => el.value.trim()).filter(Boolean);
     const usedPlaceholder = photos.length === 0;
+    const pinDest = !!(document.getElementById('loc-pin') && document.getElementById('loc-pin').checked);
     const err = document.getElementById('loc-form-error'), btn = document.getElementById('loc-form-submit');
 
     if (!name || !category || !province || isNaN(lat) || isNaN(lng)) {
@@ -1946,11 +1954,12 @@ function submitAddLocation() {
     // No photo entered -> save a placeholder token (white image with the category name)
     const sendPhotos = usedPlaceholder ? [PH_PREFIX + category] : photos;
     if (usedPlaceholder) photos = [placeholderPhoto(category)];
-    callBackend(editId ? 'updateLocation' : 'addLocation', { id: editId, name, category, province, latitude: lat, longitude: lng, price, openHours, photos: sendPhotos, desc })
+    callBackend(editId ? 'updateLocation' : 'addLocation', { id: editId, name, category, province, latitude: lat, longitude: lng, price, openHours, photos: sendPhotos, desc, pinDest })
         .then(res => {
             if (res && res.success) {
-                if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc }); }
-                else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, _id: res.id });
+                if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest }); }
+                else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, _id: res.id });
+                if (pinDest) LOCATIONS.forEach(x => { if (x.province === province && x.name !== name) x.pinDest = false; });
                 closeAdminContentModal();
                 exPage = 1;
                 render();
@@ -2229,8 +2238,16 @@ function setHomeSort(v) { homeSort=v; render(); }
 
 // ===== HOME: EXPLORE BY DESTINATION =====
 const DESTINATION_PROVINCES = ['Siem Reap', 'Phnom Penh', 'Koh Kong', 'Preah Sihanouk', 'Kampot', 'Kep', 'Battambang'];
+// Provinces pinned by an Admin that are not in the default list are added after it.
+function destinationList() {
+    const extra = [];
+    LOCATIONS.forEach(l => { if (l.pinDest && l.province && !DESTINATION_PROVINCES.includes(l.province) && !extra.includes(l.province)) extra.push(l.province); });
+    return DESTINATION_PROVINCES.concat(extra);
+}
 function destinationPhoto(prov) {
     const list = LOCATIONS.filter(l => l.province === prov && l.photos && l.photos.length);
+    const pinned = list.find(l => l.pinDest);
+    if (pinned) return pinned.photos[0];
     const best = list.find(l => l.category === 'Things to do' || l.category === 'Temple') || list[0];
     return best ? best.photos[0] : '';
 }
@@ -2294,7 +2311,7 @@ function renderHome(container) {
         <div class="mb-8">
             <h3 class="text-sm font-bold text-slate-800 mb-4">Explore by Destination</h3>
             <div class="flex overflow-x-auto gap-3 no-scrollbar pb-3">
-                ${DESTINATION_PROVINCES.map(prov => { const photo = destinationPhoto(prov); return `
+                ${destinationList().map(prov => { const photo = destinationPhoto(prov); return `
                 <div onclick="openDestination('${prov}')" class="w-40 flex-shrink-0 bg-white rounded-[22px] overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:scale-95 transition-all">
                     <div class="h-28 bg-gradient-to-br from-sky-200 to-sky-100">${photo ? `<img src="${photo}" loading="lazy" class="w-full h-full object-cover">` : ''}</div>
                     <div class="px-3 py-3 flex items-center gap-2"><i class="fa-solid fa-location-dot text-sky-700 text-sm"></i><span class="text-[12px] font-bold text-slate-800 truncate">${prov}</span></div>
@@ -2922,12 +2939,6 @@ function updateExploreList() {
                     ${l.price ? `<span class="text-[9px] font-black text-sky-700 bg-sky-50 px-2 py-1 rounded-lg">${l.price}</span>` : ''}
                     ${getLocationViews(l.name) > 0 ? `<span class="text-[9px] text-slate-300"><i class="fa-solid fa-eye mr-1"></i>${formatNum(getLocationViews(l.name))}</span>` : ''}
                 </div>
-                ${isAdmin() ? `<div class="flex items-center gap-1 mt-3" onclick="event.stopPropagation()">
-                    ${[1,2,3,4,5].map(n => { const cur = Math.round(adminRank(l.name)); const star = `${n<=cur?'fa-solid text-amber-500':'fa-regular text-slate-300'} fa-star text-lg`; return isAdmin()
-                        ? `<i class="${star} cursor-pointer" onclick="event.stopPropagation();submitRating('${l.name.replace(/'/g,"\\'")}',${n})"></i>`
-                        : `<i class="${star}"></i>`; }).join('')}
-                    ${adminRank(l.name) > 0 ? `<span class="text-[11px] font-black text-amber-600 ml-1">${adminRank(l.name).toFixed(1)}</span>` : ''}
-                </div>` : ''}
                 ${canEditContent() && l._id ? `<div class="flex gap-2 mt-3">
                     <button onclick="event.stopPropagation();adminEdit('location','${l._id}')" class="px-4 h-9 bg-sky-50 text-sky-700 border border-sky-100 rounded-xl font-black text-[11px] flex items-center gap-1.5 active:scale-95 transition-all"><i class="fa-solid fa-pen"></i> Edit</button>
                     <button onclick="event.stopPropagation();adminDelete('location','${l._id}')" class="px-4 h-9 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-[11px] flex items-center gap-1.5 active:scale-95 transition-all"><i class="fa-solid fa-trash"></i> Delete</button>
@@ -2943,6 +2954,44 @@ function updateExploreList() {
 }
 
 // ===== MY JOURNEY TAB (was Favourites): Your Trip (saved favourites) + My Travel Notes + Khmer Phrasebook =====
+function renderFavCard(l) {
+    return `
+                    <div class="flex gap-4 p-4 bg-white rounded-[25px] shadow-sm border border-slate-50">
+                        <div onclick="openDetails('${l.name}')" class="relative w-20 h-20 flex-shrink-0">
+                            <img src="${l.photos[0]}" class="w-full h-full object-cover rounded-[18px]" loading="lazy">
+                            ${getLocationViews(l.name) > 0 ? `<div class="absolute -bottom-1 -right-1 bg-sky-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><i class="fa-solid fa-eye" style="font-size:7px"></i>${formatNum(getLocationViews(l.name))}</div>` : ''}
+                        </div>
+                        <div onclick="openDetails('${l.name}')" class="flex flex-col justify-center flex-1 overflow-hidden">
+                            <h4 class="font-bold text-sm text-slate-800 truncate">${l.name}</h4>
+                            <p class="text-[10px] text-slate-400 mb-1 font-medium">${l.category}</p>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                ${renderRatingBadge(l.name)}
+                                <p class="text-[10px] text-slate-300 italic">${l.province}</p>
+                            </div>
+                        </div>
+                        <button onclick="toggleFavourite('${l.name}',this)" class="w-8 h-8 flex items-center justify-center flex-shrink-0 mt-1">
+                            <i class="fa-solid fa-heart text-rose-500 text-lg"></i>
+                        </button>
+                    </div>`;
+}
+// Places saved from Plan My Trip are grouped under a header per day; other favourites go under "Other places".
+function renderFavGroups(favItems) {
+    const grid = items => `<div class="space-y-4 list-grid">${items.map(renderFavCard).join('')}</div>`;
+    const plan = savedTripPlan && Array.isArray(savedTripPlan.days) ? savedTripPlan : null;
+    if (!plan) return grid(favItems);
+    const used = new Set();
+    const header = (label, sub) => `<div class="flex items-center gap-3 mt-6 mb-3"><span class="px-4 py-1.5 bg-sky-700 text-white rounded-full text-[12px] font-black whitespace-nowrap">${label}</span><span class="text-[11px] font-bold text-slate-400 whitespace-nowrap">${sub}</span><div class="flex-1 h-px bg-slate-100"></div></div>`;
+    let html = '';
+    plan.days.forEach((names, i) => {
+        const items = names.map(n => favItems.find(l => l.name === n)).filter(Boolean);
+        items.forEach(l => used.add(l.name));
+        if (!items.length) return;
+        html += header('Day ' + (i + 1), `${plan.destination ? plan.destination + ' • ' : ''}${items.length} place${items.length!==1?'s':''}`) + grid(items);
+    });
+    const rest = favItems.filter(l => !used.has(l.name));
+    if (rest.length) html += header('Other places', `${rest.length} place${rest.length!==1?'s':''}`) + grid(rest);
+    return html;
+}
 function renderFavourite(container) {
     const favItems = LOCATIONS.filter(l => favourites.includes(l.name));
     container.innerHTML = `
@@ -2978,26 +3027,7 @@ function renderFavourite(container) {
                 <p class="text-xs text-slate-300">Tap the heart icon on any location to save it here</p>
                 <button onclick="switchTab('explore')" class="mt-5 px-6 py-3 bg-sky-700 text-white rounded-2xl text-xs font-bold">Explore Places</button>
             </div>` : `
-            <div class="space-y-4 list-grid">
-                ${favItems.map(l=>`
-                    <div class="flex gap-4 p-4 bg-white rounded-[25px] shadow-sm border border-slate-50">
-                        <div onclick="openDetails('${l.name}')" class="relative w-20 h-20 flex-shrink-0">
-                            <img src="${l.photos[0]}" class="w-full h-full object-cover rounded-[18px]" loading="lazy">
-                            ${getLocationViews(l.name) > 0 ? `<div class="absolute -bottom-1 -right-1 bg-sky-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><i class="fa-solid fa-eye" style="font-size:7px"></i>${formatNum(getLocationViews(l.name))}</div>` : ''}
-                        </div>
-                        <div onclick="openDetails('${l.name}')" class="flex flex-col justify-center flex-1 overflow-hidden">
-                            <h4 class="font-bold text-sm text-slate-800 truncate">${l.name}</h4>
-                            <p class="text-[10px] text-slate-400 mb-1 font-medium">${l.category}</p>
-                            <div class="flex items-center gap-2 flex-wrap">
-                                ${renderRatingBadge(l.name)}
-                                <p class="text-[10px] text-slate-300 italic">${l.province}</p>
-                            </div>
-                        </div>
-                        <button onclick="toggleFavourite('${l.name}',this)" class="w-8 h-8 flex items-center justify-center flex-shrink-0 mt-1">
-                            <i class="fa-solid fa-heart text-rose-500 text-lg"></i>
-                        </button>
-                    </div>`).join('')}
-            </div>`}
+            ${renderFavGroups(favItems)}`}
         <button onclick="openPlanTrip()" class="w-full h-14 mt-4 mb-6 bg-sky-50 text-sky-700 border border-sky-100 rounded-[22px] font-black text-[12px] flex items-center justify-center gap-2 active:scale-95 transition-all"><i class="fa-solid fa-wand-magic-sparkles"></i> Plan My Trip</button>
 
         <div class="bg-white rounded-[22px] border border-slate-100 shadow-sm p-4 mb-6">
@@ -4554,8 +4584,12 @@ function tripDistanceBetween(a, b) {
     if (!a || !b) return '';
     return calculateDistance(a.latitude, a.longitude, b.latitude, b.longitude) + ' km';
 }
+// The saved plan (which places belong to which day) so My Journey can show a header for every day.
+let savedTripPlan = JSON.parse(localStorage.getItem('trip_plan_cambodia') || 'null');
 function saveTripPlan() {
     if (!tripPlanResult) return;
+    savedTripPlan = { destination: tripPlanResult.destination, days: tripPlanResult.dayList.map(d => d.stops.map(s => s.loc.name)) };
+    localStorage.setItem('trip_plan_cambodia', JSON.stringify(savedTripPlan));
     const all = tripPlanResult.dayList.flatMap(d => d.stops.map(s => s.loc.name));
     all.forEach(name => {
         if (!isFav(name)) favourites.push(name);
@@ -4722,7 +4756,6 @@ async function openDetails(name) {
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-regular fa-clock text-sky-600 w-4"></i>Best time to visit: ${loc.openHours || 'Anytime'}</div>
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-solid fa-hourglass-half text-sky-600 w-4"></i>Suggested time: ${suggestedTime(loc)}</div>
         </div>
-        <div id="rating-widget-holder">${renderRatingWidget(loc.name)}</div>
         <div onclick="window.detailAskAI('Tell me about ${loc.name.replace(/'/g,"\\'")} — is it good for children? What should I see first?')" class="bg-sky-50 rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-95 transition-all">
             <div class="w-10 h-10 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 flex-shrink-0"><i class="fa-solid fa-robot"></i></div>
             <div class="flex-1 min-w-0">
@@ -4738,9 +4771,8 @@ async function openDetails(name) {
         <div class="bg-slate-50 rounded-2xl p-5 mb-4 text-center">
             <p class="text-3xl font-black text-slate-800">${count ? avgRating(loc.name).toFixed(1) : '—'}</p>
             <div class="flex justify-center gap-1 my-2">${[1,2,3,4,5].map(n=>`<i class="fa-solid fa-star ${count && n<=Math.round(avgRating(loc.name))?'text-amber-500':'text-slate-200'} text-sm"></i>`).join('')}</div>
-            <p class="text-[11px] text-slate-400 font-semibold">${count ? formatNum(count)+' rating'+(count!==1?'s':'') : 'No ratings yet — be the first'}</p>
-        </div>
-        <div id="rating-widget-holder">${renderRatingWidget(loc.name)}</div>`;
+            <p class="text-[11px] text-slate-400 font-semibold">${count ? formatNum(count)+' rating'+(count!==1?'s':'') : 'No ratings yet'}</p>
+        </div>`;
     };
 
     const renderTipsTab = () => `
