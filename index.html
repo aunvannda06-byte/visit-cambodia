@@ -128,6 +128,7 @@
             #trend-shorts { grid-template-columns:repeat(4,minmax(0,1fr)) !important; column-gap:20px !important; row-gap:24px !important; }
         }
         /* Trending player: 9:16 videos fit one phone screen; "Show full length" expands them */
+        @media (max-width:1023px) { .short-thumb { aspect-ratio:3/4 !important; } }
         #yt-wrap { position:relative; margin:0 auto; border-radius:16px; background:#000; overflow:hidden; }
         #yt-wrap.vw-wide { aspect-ratio:16/9; width:100%; max-height:calc(100vh - 170px); max-height:calc(100dvh - 170px); }
         #yt-wrap.vw-short { aspect-ratio:9/16; width:min(100%, calc((100vh - 260px) * 9 / 16)); width:min(100%, calc((100dvh - 260px) * 9 / 16)); }
@@ -1716,6 +1717,7 @@ async function loadRemoteContent() {
                     price: row.Price || '', openHours: row.OpenHours || '',
                     photos: Array.isArray(row.Photos) ? row.Photos.map(resolvePhoto) : [],
                     pinDest: String(row.PinDest || '').toLowerCase() === 'yes',
+                    phone: String(row.Phone == null ? '' : row.Phone).trim(),
                     desc: row.Desc || '', _id: row.ID
                 });
             });
@@ -1901,6 +1903,10 @@ function openAddLocationForm(edit) {
                 </div>
             </div>
             <div>
+                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Phone Number</label>
+                <input type="tel" id="loc-phone" class="w-full h-14 mt-1 px-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-700 outline-none focus:border-sky-600" placeholder="e.g. 012 345 678">
+            </div>
+            <div>
                 <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Photos (Cloudinary URLs) <span class="normal-case font-medium">— optional, a white placeholder is used if empty</span></label>
                 <div id="photo-inputs" class="mt-1">
                     <input type="text" id="photo-url-0" placeholder="https://res.cloudinary.com/..." class="w-full h-12 px-4 rounded-xl bg-slate-50 border border-slate-100 text-xs font-medium outline-none focus:border-sky-600">
@@ -1930,7 +1936,7 @@ function openAddLocationForm(edit) {
         const set = (id, v) => { document.getElementById(id).value = v == null ? '' : v; };
         document.querySelector('#admin-content-modal-body h3').lastChild.textContent = 'Edit Location';
         set('loc-name', edit.name); set('loc-category', edit.category); set('loc-province', edit.province);
-        set('loc-lat', edit.latitude); set('loc-lng', edit.longitude); set('loc-price', edit.price); set('loc-desc', edit.desc);
+        set('loc-lat', edit.latitude); set('loc-lng', edit.longitude); set('loc-price', edit.price); set('loc-desc', edit.desc); set('loc-phone', edit.phone);
         const m = String(edit.openHours || '').match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
         if (m) { set('loc-open-from', m[1].padStart(5, '0')); set('loc-open-to', m[2].padStart(5, '0')); }
         (edit.photos || []).filter(u => !isPlaceholderPhoto(u)).forEach((u, i) => { if (i > 0) addPhotoInput(); set('photo-url-' + i, u); });
@@ -1949,6 +1955,7 @@ function submitAddLocation() {
     const openTo = document.getElementById('loc-open-to').value;
     const openHours = (openFrom && openTo) ? `${openFrom}-${openTo}` : '';
     const desc = document.getElementById('loc-desc').value.trim();
+    const phone = document.getElementById('loc-phone').value.trim();
     let photos = Array.from(document.querySelectorAll('[id^="photo-url-"]')).map(el => el.value.trim()).filter(Boolean);
     const usedPlaceholder = photos.length === 0;
     const pinDest = !!(document.getElementById('loc-pin') && document.getElementById('loc-pin').checked);
@@ -1967,11 +1974,11 @@ function submitAddLocation() {
     // No photo entered -> save a placeholder token (white image with the category name)
     const sendPhotos = usedPlaceholder ? [PH_PREFIX + category] : photos;
     if (usedPlaceholder) photos = [placeholderPhoto(category)];
-    callBackend(editId ? 'updateLocation' : 'addLocation', { id: editId, name, category, province, latitude: lat, longitude: lng, price, openHours, photos: sendPhotos, desc, pinDest })
+    callBackend(editId ? 'updateLocation' : 'addLocation', { id: editId, name, category, province, latitude: lat, longitude: lng, price, openHours, photos: sendPhotos, desc, pinDest, phone })
         .then(res => {
             if (res && res.success) {
-                if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest }); }
-                else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, _id: res.id });
+                if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, phone }); }
+                else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, phone, _id: res.id });
                 if (pinDest) LOCATIONS.forEach(x => { if (x.province === province && x.name !== name) x.pinDest = false; });
                 savePinCache();
                 closeAdminContentModal();
@@ -2525,7 +2532,7 @@ function renderTrendingShorts() {
     }
     return list.map(v => `
         <div onclick="openVideo('${v.id}')" class="cursor-pointer active:scale-95 transition-all">
-            <div class="relative w-full rounded-2xl overflow-hidden bg-slate-800" style="aspect-ratio:9/16">
+            <div class="short-thumb relative w-full rounded-2xl overflow-hidden bg-slate-800" style="aspect-ratio:9/16">
                 ${videoThumbHtml(v)}
                 ${videoAdminBtns(v)}
                 <div class="absolute top-2 left-2 bg-rose-600 text-white text-[9px] font-black px-2 py-1 rounded-lg flex items-center gap-1"><i class="fa-solid fa-bolt"></i>${videoPlatform(v)==='tiktok' ? 'TikTok' : (videoPlatform(v)==='facebook' ? 'Reel' : 'Shorts')}</div>
@@ -2610,7 +2617,7 @@ function renderTrending(container) {
             <div id="trend-sec-grid"><div id="trend-grid" class="grid grid-cols-1 gap-y-6">${renderTrendingGrid()}</div><div id="trend-pag-grid" class="flex justify-center gap-4 py-8">${trendPagHtml(filteredVideos().filter(v => !isShortVideo(v)), 'grid')}</div></div>
             <div id="trend-sec-shorts">
                 <div class="trend-sec-head flex items-center gap-2 mb-4"><i class="fa-solid fa-bolt text-rose-600 text-lg"></i><h3 class="text-base font-black text-slate-800">Shorts</h3></div>
-                <div id="trend-shorts" class="grid grid-cols-1 gap-5">${renderTrendingShorts()}</div>
+                <div id="trend-shorts" class="grid grid-cols-2 gap-3">${renderTrendingShorts()}</div>
                 <div id="trend-pag-shorts" class="flex justify-center gap-4 py-8">${trendPagHtml(filteredVideos().filter(isShortVideo), 'shorts')}</div>
             </div>
         </div>
@@ -4866,6 +4873,7 @@ async function openDetails(name) {
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-solid fa-tag text-sky-600 w-4"></i>Price: ${loc.price || 'Free / Not specified'}</div>
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-regular fa-clock text-sky-600 w-4"></i>Best time to visit: ${loc.openHours || 'Anytime'}</div>
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-solid fa-hourglass-half text-sky-600 w-4"></i>Suggested time: ${suggestedTime(loc)}</div>
+            ${loc.phone ? `<div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-solid fa-phone text-sky-600 w-4"></i>Phone: <a href="tel:${escHtml(String(loc.phone).replace(/[^\d+]/g,''))}" class="text-sky-700 font-black no-underline">${escHtml(loc.phone)}</a></div>` : ''}
         </div>
         <div onclick="window.detailAskAI('Tell me about ${loc.name.replace(/'/g,"\\'")} — is it good for children? What should I see first?')" class="bg-sky-50 rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-95 transition-all">
             <div class="w-10 h-10 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 flex-shrink-0"><i class="fa-solid fa-robot"></i></div>
