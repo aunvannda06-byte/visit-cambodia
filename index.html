@@ -1693,7 +1693,7 @@ async function loadRemoteContent() {
             updateNotifBadge();
         }
         if (vidRes && vidRes.success && Array.isArray(vidRes.data)) {
-            VIDEOS = vidRes.data.filter(r => r.Name && ytId(r.YouTubeUrl)).map(r => ({ id: r.ID, name: r.Name, thumbnail: r.Thumbnail || '', category: r.Category || '', province: r.Province || '', url: r.YouTubeUrl, views: Number(r.Views) || 0 })).reverse();
+            VIDEOS = vidRes.data.filter(r => r.Name && parseVideo(r.YouTubeUrl)).map(r => ({ id: r.ID, name: r.Name, thumbnail: r.Thumbnail || '', category: r.Category || '', province: r.Province || '', url: parseVideo(r.YouTubeUrl).url, views: Number(r.Views) || 0 })).reverse();
         }
         if (emRes && emRes.success && Array.isArray(emRes.data)) {
             EMERGENCY = emRes.data.filter(row => row.Name && row.Number);
@@ -2414,7 +2414,62 @@ function ytId(url) {
     const m = String(url || '').match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/);
     return m ? m[1] : '';
 }
-function videoThumb(v) { return v.thumbnail || ('https://img.youtube.com/vi/' + ytId(v.url) + '/hqdefault.jpg'); }
+// Accepts a video link OR pasted embed code from YouTube, Facebook or TikTok.
+// Returns { type, url (clean link to save), embedUrl, watchUrl, short } or null.
+function parseVideo(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return null;
+    let src = raw;
+    const iframeSrc = raw.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+    const cite = raw.match(/cite=["']([^"']+)["']/i);          // TikTok embed (blockquote)
+    const tkId = raw.match(/data-video-id=["'](\d+)["']/i);
+    if (iframeSrc) src = iframeSrc[1];
+    else if (cite) src = cite[1];
+    else if (tkId) src = 'https://www.tiktok.com/embed/v2/' + tkId[1];
+    else if (/^</.test(raw)) { const h = raw.match(/https?:\/\/[^\s"'<>]+/i); if (h) src = h[0]; }
+    src = src.replace(/&amp;/g, '&').trim();
+    if (src.indexOf('//') === 0) src = 'https:' + src;
+
+    const yid = ytId(src);
+    if (yid) {
+        const isShort = /youtube\.com\/shorts\//i.test(src);
+        const url = isShort ? 'https://www.youtube.com/shorts/' + yid : 'https://www.youtube.com/watch?v=' + yid;
+        return { type: 'youtube', id: yid, url, watchUrl: url, short: isShort,
+                 embedUrl: 'https://www.youtube.com/embed/' + yid + '?autoplay=1&rel=0&playsinline=1&modestbranding=1' };
+    }
+    const tk = src.match(/tiktok\.com\/(?:.*\/video\/|embed\/v2\/|embed\/)(\d+)/i);
+    if (tk) {
+        const url = src.split('?')[0];
+        return { type: 'tiktok', id: tk[1], url, watchUrl: url, short: true, embedUrl: 'https://www.tiktok.com/embed/v2/' + tk[1] };
+    }
+    if (/^https?:\/\/([a-z0-9-]+\.)?(facebook\.com|fb\.watch|fb\.com)\//i.test(src)) {
+        let href = src;
+        if (/facebook\.com\/plugins\//i.test(src)) { try { href = new URL(src).searchParams.get('href') || ''; } catch (e) { href = ''; } }
+        if (!href) return null;
+        const isReel = /facebook\.com\/reel\//i.test(href);
+        return { type: 'facebook', id: '', url: href, watchUrl: href, short: isReel,
+                 embedUrl: 'https://www.facebook.com/plugins/video.php?href=' + encodeURIComponent(href) + '&show_text=false&autoplay=true&t=0' };
+    }
+    return null;
+}
+function videoPlatform(v) { const p = parseVideo(v.url); return p ? p.type : 'youtube'; }
+const VIDEO_PLATFORMS = {
+    youtube:  { label: 'YouTube',  icon: 'fa-youtube',  bg: '#dc2626' },
+    facebook: { label: 'Facebook', icon: 'fa-facebook', bg: '#1877f2' },
+    tiktok:   { label: 'TikTok',   icon: 'fa-tiktok',   bg: '#111827' }
+};
+function videoThumb(v) {
+    if (v.thumbnail) return v.thumbnail;
+    const p = parseVideo(v.url);
+    return (p && p.type === 'youtube') ? 'https://img.youtube.com/vi/' + p.id + '/hqdefault.jpg' : '';
+}
+// Thumbnail image, or a coloured platform tile when Facebook / TikTok has no thumbnail
+function videoThumbHtml(v) {
+    const t = videoThumb(v);
+    if (t) return `<img src="${escHtml(t)}" loading="lazy" class="w-full h-full object-cover" onerror="this.style.visibility='hidden'">`;
+    const pl = VIDEO_PLATFORMS[videoPlatform(v)] || VIDEO_PLATFORMS.youtube;
+    return `<div class="w-full h-full flex items-center justify-center" style="background:${pl.bg}"><i class="fa-brands ${pl.icon} text-white text-4xl opacity-90"></i></div>`;
+}
 function escHtml(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function filteredVideos() {
@@ -2425,7 +2480,7 @@ function filteredVideos() {
         (trendProv === 'All' || v.province === trendProv));
 }
 // A video is a "Short" (9:16) when it was added with a YouTube Shorts link (youtube.com/shorts/...)
-function isShortVideo(v) { return /youtube\.com\/shorts\//i.test(String(v.url || '')); }
+function isShortVideo(v) { const p = parseVideo(v.url); return !!(p && p.short); }
 function videoAdminBtns(v) {
     return canEditContent() ? `<div class="absolute top-2 right-2 flex gap-1.5 z-10" onclick="event.stopPropagation()">
                     <button onclick="adminEdit('video','${v.id}')" class="w-8 h-8 rounded-full bg-black/55 text-white flex items-center justify-center text-[11px]"><i class="fa-solid fa-pen"></i></button>
@@ -2441,7 +2496,7 @@ function renderTrendingGrid() {
     return list.map(v => `
         <div onclick="openVideo('${v.id}')" class="cursor-pointer active:scale-95 transition-all">
             <div class="relative w-full rounded-2xl overflow-hidden bg-slate-200" style="aspect-ratio:16/9">
-                <img src="${escHtml(videoThumb(v))}" loading="lazy" class="w-full h-full object-cover" onerror="this.style.visibility='hidden'">
+                ${videoThumbHtml(v)}
                 ${videoAdminBtns(v)}
                 <div class="absolute inset-0 flex items-center justify-center bg-black/10">
                     <div class="w-10 h-10 rounded-full bg-black/55 border-2 border-white flex items-center justify-center"><i class="fa-solid fa-play text-white text-sm ml-0.5"></i></div>
@@ -2461,9 +2516,9 @@ function renderTrendingShorts() {
     return list.map(v => `
         <div onclick="openVideo('${v.id}')" class="cursor-pointer active:scale-95 transition-all">
             <div class="relative w-full rounded-2xl overflow-hidden bg-slate-800" style="aspect-ratio:9/16">
-                <img src="${escHtml(videoThumb(v))}" loading="lazy" class="w-full h-full object-cover" onerror="this.style.visibility='hidden'">
+                ${videoThumbHtml(v)}
                 ${videoAdminBtns(v)}
-                <div class="absolute top-2 left-2 bg-rose-600 text-white text-[9px] font-black px-2 py-1 rounded-lg flex items-center gap-1"><i class="fa-solid fa-bolt"></i>Shorts</div>
+                <div class="absolute top-2 left-2 bg-rose-600 text-white text-[9px] font-black px-2 py-1 rounded-lg flex items-center gap-1"><i class="fa-solid fa-bolt"></i>${videoPlatform(v)==='tiktok' ? 'TikTok' : (videoPlatform(v)==='facebook' ? 'Reel' : 'Shorts')}</div>
                 <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div class="w-10 h-10 rounded-full bg-black/45 border-2 border-white/90 flex items-center justify-center"><i class="fa-solid fa-play text-white text-sm ml-0.5"></i></div>
                 </div>
@@ -2586,36 +2641,26 @@ function showVideoFallback(yid, reason) {
 function openVideo(id) {
     const v = VIDEOS.find(x => String(x.id) === String(id));
     if (!v) return;
-    const yid = ytId(v.url);
+    const p = parseVideo(v.url);
+    if (!p) return;
+    const pl = VIDEO_PLATFORMS[p.type];
     destroyYtPlayer();
     document.getElementById('video-modal-body').innerHTML = `
         <div class="flex items-center justify-between mb-3 gap-3">
             <h3 class="text-white font-black text-sm leading-snug">${escHtml(v.name)}</h3>
             <button onclick="closeVideoModal()" class="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-xmark text-white"></i></button>
         </div>
-        <div id="yt-wrap" class="relative w-full rounded-2xl overflow-hidden bg-black" style="${isShortVideo(v) ? 'aspect-ratio:9/16;width:min(100%,calc(78vh*9/16));margin:0 auto' : 'aspect-ratio:16/9'}">
-            <div id="yt-player" class="absolute inset-0"></div>
+        <div id="yt-wrap" class="relative w-full rounded-2xl overflow-hidden bg-black" style="${p.short ? 'aspect-ratio:9/16;width:min(100%,calc(78vh*9/16));margin:0 auto' : 'aspect-ratio:16/9'}">
+            <iframe src="${escHtml(p.embedUrl)}" class="absolute inset-0 w-full h-full" style="border:0" scrolling="no" frameborder="0" allowfullscreen
+                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
         </div>
         <div class="flex items-center justify-between gap-3 mt-3">
             <p class="text-white/60 text-[11px] font-semibold truncate">${escHtml(v.province)}${v.province && v.category ? ' • ' : ''}${escHtml(v.category)}</p>
-            <a href="https://www.youtube.com/watch?v=${yid}" target="_blank" rel="noopener" class="text-[11px] font-black text-white bg-white/15 px-3 py-2 rounded-xl flex-shrink-0"><i class="fa-brands fa-youtube mr-1"></i>Watch on YouTube</a>
+            <a href="${escHtml(p.watchUrl)}" target="_blank" rel="noopener" class="text-[11px] font-black text-white bg-white/15 px-3 py-2 rounded-xl flex-shrink-0"><i class="fa-brands ${pl.icon} mr-1"></i>Watch on ${pl.label}</a>
         </div>
     `;
     document.getElementById('video-modal').classList.remove('hidden');
     pushModalHistory();
-    // Player: if YouTube refuses to play inside the app (blocked, embedding disabled, offline...) show a clear fallback instead of a black box
-    ytTimer = setTimeout(() => showVideoFallback(yid, 'no response'), 8000);
-    loadYouTubeApi().then(() => {
-        if (!document.getElementById('yt-player')) return;
-        ytPlayer = new YT.Player('yt-player', {
-            videoId: yid, width: '100%', height: '100%',
-            playerVars: { autoplay: 1, rel: 0, playsinline: 1, modestbranding: 1 },
-            events: {
-                onReady: e => { if (ytTimer) { clearTimeout(ytTimer); ytTimer = null; } try { e.target.playVideo(); } catch (x) {} },
-                onError: e => showVideoFallback(yid, 'error ' + (e && e.data))
-            }
-        });
-    }).catch(() => showVideoFallback(yid, 'player blocked'));
     // Count one view per device per video
     let seen = false;
     try { seen = !!localStorage.getItem('sv_video_' + v.id); if (!seen) localStorage.setItem('sv_video_' + v.id, '1'); } catch (e) {}
@@ -2660,12 +2705,12 @@ function openAddVideoForm(edit) {
                 </div>
             </div>
             <div>
-                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">YouTube Link</label>
-                <input type="url" id="vid-url" class="w-full h-14 mt-1 px-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-700 outline-none focus:border-sky-600" placeholder="https://www.youtube.com/watch?v=...">
+                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Video Link or Embed Code <span class="normal-case font-medium">— YouTube, Facebook or TikTok</span></label>
+                <textarea id="vid-url" rows="3" class="w-full mt-1 p-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-700 outline-none focus:border-sky-600 resize-none" placeholder="Paste a video link, or the Embed code (&lt;iframe ...&gt;)"></textarea>
             </div>
             <div>
                 <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Thumbnail URL (optional)</label>
-                <input type="url" id="vid-thumb" class="w-full h-14 mt-1 px-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-700 outline-none focus:border-sky-600" placeholder="Leave empty to use the YouTube thumbnail">
+                <input type="url" id="vid-thumb" class="w-full h-14 mt-1 px-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-700 outline-none focus:border-sky-600" placeholder="Leave empty to use the YouTube thumbnail (Facebook / TikTok show a coloured tile)">
             </div>
             <p id="vid-error" class="text-[12px] font-bold text-rose-500 hidden"></p>
             <button id="vid-btn" onclick="submitVideo()" class="w-full h-14 bg-sky-700 text-white rounded-2xl font-black flex items-center justify-center gap-2 active:scale-95 transition-all">Save Video</button>
@@ -2682,11 +2727,13 @@ function submitVideo() {
     const name = document.getElementById('vid-name').value.trim();
     const category = document.getElementById('vid-category').value;
     const province = document.getElementById('vid-province').value;
-    const url = document.getElementById('vid-url').value.trim();
+    const rawUrl = document.getElementById('vid-url').value.trim();
     const thumbnail = document.getElementById('vid-thumb').value.trim();
     const err = document.getElementById('vid-error'), btn = document.getElementById('vid-btn');
-    if (!name || !url) { err.textContent = 'Please enter the place name and the YouTube link.'; err.classList.remove('hidden'); return; }
-    if (!ytId(url)) { err.textContent = 'That does not look like a valid YouTube link.'; err.classList.remove('hidden'); return; }
+    if (!name || !rawUrl) { err.textContent = 'Please enter the place name and the video link or embed code.'; err.classList.remove('hidden'); return; }
+    const parsed = parseVideo(rawUrl);
+    if (!parsed) { err.textContent = /vm\.tiktok|tiktok\.com\/t\//i.test(rawUrl) ? 'Please paste the full TikTok link (…/video/123…) or the Embed code, not the short link.' : 'That does not look like a valid YouTube, Facebook or TikTok link / embed code.'; err.classList.remove('hidden'); return; }
+    const url = parsed.url; // embed code is saved as a clean video link
     err.classList.add('hidden');
     btn.disabled = true;
     btn.innerHTML = '<div class="loader-spinner" style="border-color:rgba(255,255,255,0.35);border-top-color:#fff"></div>';
