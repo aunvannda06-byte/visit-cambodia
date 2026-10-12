@@ -4763,7 +4763,7 @@ async function openDetails(name) {
         </div>`;
 
     const renderAboutTab = () => `
-        <p class="text-[13px] text-slate-500 leading-relaxed mb-5">${loc.desc||'A beautiful destination in Cambodia.'}</p>
+        <p class="text-[13px] text-slate-500 leading-relaxed mb-5" style="white-space:pre-line">${loc.desc||'A beautiful destination in Cambodia.'}</p>
         <div class="bg-slate-50 rounded-2xl p-4 mb-5 space-y-3">
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-solid fa-tag text-sky-600 w-4"></i>Price: ${loc.price || 'Free / Not specified'}</div>
             <div class="flex items-center gap-2 text-[12px] text-slate-600 font-semibold"><i class="fa-regular fa-clock text-sky-600 w-4"></i>Best time to visit: ${loc.openHours || 'Anytime'}</div>
