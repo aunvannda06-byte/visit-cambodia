@@ -2169,6 +2169,7 @@ function loadRatings() {
 }
 // Small read-only "★ 4.8 (24)" badge used on cards.
 function renderRatingBadge(name) {
+    if (!isAdmin()) return ''; // Users / Guests never see stars
     const count = ratingCount(name);
     if (!count) return '';
     return `<span class="rating-pill text-[9px] text-amber-600 bg-amber-50 px-2 py-1 rounded-lg"><i class="fa-solid fa-star"></i>${avgRating(name).toFixed(1)} <span class="text-slate-400 font-semibold">(${formatNum(count)})</span></span>`;
@@ -2416,7 +2417,7 @@ function renderIconSlider() {
             <div class="p-4">
                 <h4 class="text-[12px] font-bold text-slate-800 truncate">${l.name}</h4>
                 <div class="flex justify-between items-center mt-2">
-                    ${ratingCount(l.name) ? renderRatingBadge(l.name) : `<span class="text-[9px] font-bold text-slate-400">${l.province}</span>`}
+                    ${(isAdmin() && ratingCount(l.name)) ? renderRatingBadge(l.name) : `<span class="text-[9px] font-bold text-slate-400">${l.province}</span>`}
                     <i class="fa-solid fa-circle-chevron-right text-sky-700"></i>
                 </div>
             </div>
@@ -4315,7 +4316,7 @@ function renderEmergencyModal() {
                                 <p class="text-[11px] text-slate-400 font-semibold truncate">${escHtml(type.km)}</p>
                                 ${e.Name && e.Name !== type.label ? `<p class="text-[11px] text-slate-500 font-bold truncate mt-0.5">${escHtml(e.Name)}</p>` : ''}
                             </div>
-                            ${dist !== null ? `<span class="text-[13px] font-black text-emerald-700 flex-shrink-0">${dist < 10 ? dist.toFixed(1) : Math.round(dist)} km</span>` : `<span class="text-[12px] font-black flex-shrink-0" style="color:#b91c1c">${escHtml(e.Number)}</span>`}
+                            ${(dist !== null && isAdmin()) ? `<span class="text-[13px] font-black text-emerald-700 flex-shrink-0">${dist < 10 ? dist.toFixed(1) : Math.round(dist)} km</span>` : `<span class="text-[12px] font-black flex-shrink-0" style="color:#b91c1c">${escHtml(e.Number)}</span>`}
                         </div>
                         ${(e.Address || e.Notes) ? `<p class="text-[10px] text-slate-400 font-medium mt-2 leading-snug">${escHtml(e.Address || e.Notes)}</p>` : ''}
                         <div class="flex gap-2 mt-3">
@@ -4390,11 +4391,31 @@ function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function formatAIReply(text) {
-    let t = escapeHtml(text);
-    t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    t = t.replace(/^[-*]\s+(.+)$/gm, '• $1');
-    t = t.replace(/\n/g, '<br>');
-    return t;
+    // Turns the AI's reply into tidy paragraphs / bullet lists / numbered lists / bold - never raw * or # symbols.
+    let t = escapeHtml(text).replace(/\r/g, '');
+    t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong>$1</strong>')
+         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+         .replace(/__(.+?)__/g, '<strong>$1</strong>')
+         .replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,!?:;]|$)/gm, '$1<em>$2</em>');
+    let out = '', list = null;
+    const close = () => { if (list) { out += '</' + list + '>'; list = null; } };
+    t.split('\n').forEach(raw => {
+        const ln = raw.trim();
+        let m;
+        if (!ln) { close(); out += '<div style="height:6px"></div>'; return; }
+        if ((m = ln.match(/^#{1,6}\s+(.+)$/))) { close(); out += '<div class="font-black text-slate-800" style="margin-top:6px">' + m[1] + '</div>'; return; }
+        if ((m = ln.match(/^[-*•]\s+(.+)$/))) {
+            if (list !== 'ul') { close(); out += '<ul style="list-style:disc;padding-left:18px;margin:4px 0">'; list = 'ul'; }
+            out += '<li>' + m[1] + '</li>'; return;
+        }
+        if ((m = ln.match(/^(\d+)[.)]\s+(.+)$/))) {
+            if (list !== 'ol') { close(); out += '<ol style="list-style:decimal;padding-left:20px;margin:4px 0">'; list = 'ol'; }
+            out += '<li>' + m[2] + '</li>'; return;
+        }
+        close(); out += '<div>' + ln + '</div>';
+    });
+    close();
+    return out.replace(/\*/g, '').replace(/`/g, '');
 }
 
 function renderAIChatLog() {
@@ -4438,21 +4459,29 @@ function buildEssentialsSummary() {
 }
 
 function buildAIContext() {
-    // Compact summary of the app’s real data — Essentials tab plus every relevant Sheet — so the AI
-    // grounds answers in actual platform content before it falls back on general knowledge.
-    const essentialsSummary = buildEssentialsSummary();
-    const locSummary = LOCATIONS.slice(0, 120).map(l =>
-        `${l.name} | ${l.category} | ${l.province} | ${l.price||'n/a'} | ${l.openHours||'n/a'}`
+    // The app's own data, in priority order: Explore (Locations) for place questions, then Essentials, Events,
+    // Emergency, Trending videos... so the AI answers from the platform's data before its own knowledge.
+    const clip = (t, n) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, n);
+    const admin = isAdmin();
+    // Same order as the Explore tab: highest Admin rating first (the rating itself is only shown to Admins)
+    const places = LOCATIONS.slice().sort((a, b) => adminRank(b.name) - adminRank(a.name));
+    const locSummary = places.map(l =>
+        `${l.name} | ${l.category} | ${l.province}${admin && adminRank(l.name) ? ' | ' + adminRank(l.name).toFixed(1) + ' stars' : ''} | price: ${l.price||'n/a'} | hours: ${l.openHours||'n/a'}${l.phone ? ' | phone: ' + l.phone : ''}${l.desc ? ' | ' + clip(l.desc, 140) : ''}`
     ).join('\n');
-    const evSummary = EVENTS.map(e => `${e.title} | ${e.date}`).join('\n');
-    let ctx = 'ESSENTIALS (practical info from the app’s Essentials tab):\n' + essentialsSummary;
-    ctx += '\n\nLOCATIONS (name | category | province | price | hours):\n' + locSummary;
-    ctx += '\n\nEVENTS (title | date):\n' + evSummary;
+    const evSummary = EVENTS.map(e => `${e.title} | ${e.date}${e.desc ? ' | ' + clip(e.desc, 140) : ''}`).join('\n');
+    let ctx = '';
+    if (!admin) ctx += 'DISPLAY RULES: This visitor must NOT be shown star ratings or distances (km). Never mention stars, ratings or distances. Use the order of the LOCATIONS list to decide what to recommend first.\n\n';
+    ctx += 'LOCATIONS = the Explore tab (name | category | province | price | hours | phone | description), best first:\n' + locSummary;
+    ctx += '\n\nESSENTIALS (practical info from the app\u2019s Essentials tab):\n' + buildEssentialsSummary();
+    ctx += '\n\nEVENTS (title | date | description):\n' + evSummary;
     if (EMERGENCY.length) {
         const emSummary = EMERGENCY.map(e => `${e.Name} | ${e.Category||''} | ${e.Number} | ${e.Region||'All'} | ${e.Notes||''}`).join('\n');
         ctx += '\n\nEMERGENCY CONTACTS (name | category | number | region | notes):\n' + emSummary;
     }
-    if (userPos) ctx += `\n\nUSER’S CURRENT LOCATION: lat ${userPos.lat}, lng ${userPos.lng}`;
+    if (typeof VIDEOS !== 'undefined' && VIDEOS.length) {
+        ctx += '\n\nTRENDING VIDEOS (title | province | category):\n' + VIDEOS.map(v => `${v.name} | ${v.province||''} | ${v.category||''}`).join('\n');
+    }
+    if (userPos) ctx += `\n\nUSER\u2019S CURRENT LOCATION: lat ${userPos.lat}, lng ${userPos.lng}`;
     return ctx;
 }
 
@@ -4810,7 +4839,7 @@ function renderPlanTrip() {
                             <div class="flex-1 min-w-0">
                                 <p class="text-xs font-black text-slate-400">${fmtTime(st.time)}</p>
                                 <h4 class="text-sm font-bold text-slate-800 truncate">${st.loc.name}</h4>
-                                <p class="text-[10px] text-slate-400 font-semibold">${tripDayDuration(st)}${i>0?' • '+tripDistanceBetween(day.stops[i-1].loc, st.loc):''}</p>
+                                <p class="text-[10px] text-slate-400 font-semibold">${tripDayDuration(st)}${(i>0 && isAdmin())?' • '+tripDistanceBetween(day.stops[i-1].loc, st.loc):''}</p>
                             </div>
                         </div>
                     </div>
@@ -4911,7 +4940,7 @@ async function openDetails(name) {
                     <img src="${l.photos[0]}" class="w-14 h-14 rounded-xl object-cover flex-shrink-0">
                     <div class="flex-1 min-w-0 flex flex-col justify-center">
                         <h4 class="text-[12px] font-bold text-slate-800 truncate">${l.name}</h4>
-                        <p class="text-[10px] text-slate-400">${l.category} • ${l.distance.toFixed(1)} km</p>
+                        <p class="text-[10px] text-slate-400">${l.category}${isAdmin() ? ' • ' + l.distance.toFixed(1) + ' km' : ''}</p>
                     </div>
                 </div>`).join('')}
         </div>`;
@@ -4936,7 +4965,7 @@ async function openDetails(name) {
             </div>
             <div class="px-6 pt-5 pb-8">
                 <h3 class="text-xl font-black text-slate-800">${loc.name}</h3>
-                <p class="text-[12px] text-slate-400 font-semibold mt-1"><i class="fa-solid fa-location-dot text-sky-600 mr-1"></i>${loc.province || 'Cambodia'}${distanceKm !== null ? ` • ${distanceKm} km` : ''}</p>
+                <p class="text-[12px] text-slate-400 font-semibold mt-1"><i class="fa-solid fa-location-dot text-sky-600 mr-1"></i>${loc.province || 'Cambodia'}${(distanceKm !== null && isAdmin()) ? ` • ${distanceKm} km` : ''}</p>
                 <div class="flex items-center gap-2 flex-wrap mt-2 mb-4">
                     ${ratingCount(loc.name) ? renderRatingBadge(loc.name) : ''}
                     ${loc.openHours ? renderOpenBadge(loc.openHours) : ''}
