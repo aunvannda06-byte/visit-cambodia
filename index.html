@@ -281,7 +281,7 @@ function closeTopmostModalSilently() {
         ['weather-modal', el => el.classList.add('hidden')],
         ['plantrip-modal', el => el.classList.add('hidden')],
         ['info-modal', el => el.classList.add('hidden')],
-        ['details-modal', el => el.classList.add('hidden')]
+        ['details-modal', el => { if (detailNavStack.length) { const p = detailNavStack.pop(); openDetails(p.name, { tab: p.tab, restore: true }); } else el.classList.add('hidden'); }]
     ];
     for (const [id, hide] of checks) {
         const el = document.getElementById(id);
@@ -292,6 +292,11 @@ function closeTopmostModalSilently() {
 }
 
 // ===== DATA =====
+// A location can have several categories, stored in one cell as "Hotel, Temple".
+function catList(c) { return Array.isArray(c) ? c.filter(Boolean) : String(c == null ? '' : c).split(/\s*,\s*/).filter(Boolean); }
+function catHas(l, c) { return catList(l && l.category).includes(c); }
+function catFirst(c) { return catList(c)[0] || ''; }
+let detailNavStack = [];   // Nearby -> place -> Back returns to the previous place's Nearby tab
 const CATEGORIES = ["Things to do","Temple","Food&Drink","Eco Tourism","Hotel","Resort/Boutique","Sea/Beach","Camping","Khmer Food","Street Food","Shopping Mall","Mart","Local Market","Souvenirs","Sky Bar","Massage&Spa","Money Exchange","Transporation","Phamarcy","Museum","Garden/Park","Natural Coffee","Restaurant (Nature)","Gas Station"];
 
 // ===== HOME: CATEGORY GROUPS (Home page "Categories" icons) =====
@@ -1384,7 +1389,7 @@ function seededShuffle(list, seed) {
 function getDailyIconSliderLocations(category) {
     // Each Home "Categories" icon is a group of sub-categories (see HOME_GROUP_MEMBERS).
     const members = HOME_GROUP_MEMBERS[category];
-    const pool = LOCATIONS.filter(l => members ? members.includes(l.category) : l.category === category);
+    const pool = LOCATIONS.filter(l => members ? members.some(m => catHas(l, m)) : catHas(l, category));
     // Spread today's picks across different provinces (round-robin) instead of clustering in one area.
     const byProvince = {};
     seededShuffle(pool, dailyRotationSeed('home_card_' + category)).forEach(l => {
@@ -1406,15 +1411,15 @@ function getDailyIconSliderLocations(category) {
 
 function getDailyStories() {
     const storiesCount = 8;
-    const eligible = LOCATIONS.filter(l => l.photos && l.photos.length > 0 && l.category !== 'Hotel');
+    const eligible = LOCATIONS.filter(l => l.photos && l.photos.length > 0 && !catHas(l, 'Hotel'));
     // Exclude whatever the Home location card is showing today, so Stories never duplicates it.
     const homeCardToday = new Set(getDailyIconSliderLocations(iconFilter).map(l => l.name));
     const pool = eligible.filter(l => !homeCardToday.has(l.name));
     const chosen = seededShuffle(pool.length ? pool : eligible, dailyRotationSeed('stories')).slice(0, storiesCount);
     return chosen.map((loc, i) => ({
         id: 'loc_' + i,
-        author: loc.category,
-        avatar: categoryEmoji(loc.category),
+        author: catFirst(loc.category),
+        avatar: categoryEmoji(catFirst(loc.category)),
         title: loc.name,
         thumbnail: loc.photos[0],
         videoUrl: '',
@@ -1718,6 +1723,7 @@ async function loadRemoteContent() {
                     photos: Array.isArray(row.Photos) ? row.Photos.map(resolvePhoto) : [],
                     pinDest: String(row.PinDest || '').toLowerCase() === 'yes',
                     phone: String(row.Phone == null ? '' : row.Phone).trim(),
+                    videos: String(row.Videos == null ? '' : row.Videos).split('|').map(x => x.trim()).filter(Boolean),
                     desc: row.Desc || '', _id: row.ID
                 });
             });
@@ -1853,6 +1859,7 @@ function setLocFormRating(n) { locFormRating = n; renderLocRatingStars(); }
 function openAddLocationForm(edit) {
     editingLocId = edit ? edit._id : null;
     photoInputCount = 1;
+    locVideoInputCount = 1;
     locFormRating = edit ? Math.round(adminRank(edit.name)) : 0;
     locFormRatingInitial = locFormRating;
     document.getElementById('admin-content-modal-body').innerHTML = `
@@ -1865,19 +1872,17 @@ function openAddLocationForm(edit) {
                 <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Name</label>
                 <input type="text" id="loc-name" class="w-full h-14 mt-1 px-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm font-bold text-slate-700 outline-none focus:border-sky-600" placeholder="e.g. Angkor Wat">
             </div>
-            <div class="flex gap-3">
-                <div class="flex-1">
-                    <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Category</label>
-                    <select id="loc-category" class="w-full h-14 mt-1 px-3 rounded-2xl bg-slate-50 border border-slate-100 text-[11px] font-bold text-slate-700 outline-none focus:border-sky-600">
-                        ${CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}
-                    </select>
+            <div>
+                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Category <span class="normal-case font-medium">— you can select more than one</span></label>
+                <div id="loc-category" class="mt-1 p-2 rounded-2xl bg-slate-50 border border-slate-100 max-h-44 overflow-y-auto flex flex-wrap gap-2">
+                    ${CATEGORIES.map(c=>`<label class="cursor-pointer"><input type="checkbox" class="loc-cat-cb peer hidden" value="${c}"><span class="inline-block px-3 py-2 rounded-xl bg-white border border-slate-200 text-[11px] font-bold text-slate-500 peer-checked:bg-sky-700 peer-checked:border-sky-700 peer-checked:text-white">${c}</span></label>`).join('')}
                 </div>
-                <div class="flex-1">
-                    <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Province</label>
-                    <select id="loc-province" class="w-full h-14 mt-1 px-3 rounded-2xl bg-slate-50 border border-slate-100 text-[11px] font-bold text-slate-700 outline-none focus:border-sky-600">
-                        ${PROVINCES.map(p=>`<option value="${p}">${p}</option>`).join('')}
-                    </select>
-                </div>
+            </div>
+            <div>
+                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Province</label>
+                <select id="loc-province" class="w-full h-14 mt-1 px-3 rounded-2xl bg-slate-50 border border-slate-100 text-[11px] font-bold text-slate-700 outline-none focus:border-sky-600">
+                    ${PROVINCES.map(p=>`<option value="${p}">${p}</option>`).join('')}
+                </select>
             </div>
             <div class="flex gap-3">
                 <div class="flex-1">
@@ -1900,6 +1905,10 @@ function openAddLocationForm(edit) {
                         <input type="time" id="loc-open-from" class="flex-1 h-14 px-2 rounded-2xl bg-slate-50 border border-slate-100 text-xs font-bold text-slate-700 outline-none focus:border-sky-600">
                         <input type="time" id="loc-open-to" class="flex-1 h-14 px-2 rounded-2xl bg-slate-50 border border-slate-100 text-xs font-bold text-slate-700 outline-none focus:border-sky-600">
                     </div>
+                    <label class="flex items-center gap-2 mt-2 ml-1 cursor-pointer">
+                        <input type="checkbox" id="loc-open-24" class="w-4 h-4 accent-sky-700" onchange="toggleOpen24()">
+                        <span class="text-[11px] font-black text-slate-600">Open 24 hours</span>
+                    </label>
                 </div>
             </div>
             <div>
@@ -1912,6 +1921,13 @@ function openAddLocationForm(edit) {
                     <input type="text" id="photo-url-0" placeholder="https://res.cloudinary.com/..." class="w-full h-12 px-4 rounded-xl bg-slate-50 border border-slate-100 text-xs font-medium outline-none focus:border-sky-600">
                 </div>
                 <button type="button" onclick="addPhotoInput()" class="mt-2 text-[11px] font-black text-sky-700 flex items-center gap-1"><i class="fa-solid fa-circle-plus"></i> Add Photo</button>
+            </div>
+            <div>
+                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Video <span class="normal-case font-medium">— YouTube, Facebook or TikTok link (optional)</span></label>
+                <div id="video-inputs" class="mt-1">
+                    <input type="text" id="loc-video-0" placeholder="https://www.youtube.com/watch?v=..." class="w-full h-12 px-4 rounded-xl bg-slate-50 border border-slate-100 text-xs font-medium outline-none focus:border-sky-600">
+                </div>
+                <button type="button" onclick="addLocVideoInput()" class="mt-2 text-[11px] font-black text-sky-700 flex items-center gap-1"><i class="fa-solid fa-circle-plus"></i> Add Video</button>
             </div>
             <div>
                 <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wide ml-1">Description</label>
@@ -1935,34 +1951,59 @@ function openAddLocationForm(edit) {
     if (edit) {
         const set = (id, v) => { document.getElementById(id).value = v == null ? '' : v; };
         document.querySelector('#admin-content-modal-body h3').lastChild.textContent = 'Edit Location';
-        set('loc-name', edit.name); set('loc-category', edit.category); set('loc-province', edit.province);
+        set('loc-name', edit.name); set('loc-province', edit.province);
+        const _cats = catList(edit.category); document.querySelectorAll('.loc-cat-cb').forEach(cb => { cb.checked = _cats.includes(cb.value); });
         set('loc-lat', edit.latitude); set('loc-lng', edit.longitude); set('loc-price', edit.price); set('loc-desc', edit.desc); set('loc-phone', edit.phone);
         const m = String(edit.openHours || '').match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
         if (m) { set('loc-open-from', m[1].padStart(5, '0')); set('loc-open-to', m[2].padStart(5, '0')); }
+        if (is24Hours(edit.openHours)) { document.getElementById('loc-open-24').checked = true; toggleOpen24(); }
+        (edit.videos || []).forEach((u, i) => { if (i > 0) addLocVideoInput(); set('loc-video-' + i, u); });
         (edit.photos || []).filter(u => !isPlaceholderPhoto(u)).forEach((u, i) => { if (i > 0) addPhotoInput(); set('photo-url-' + i, u); });
     }
     openAdminContentModal(true);
 }
 
+let locVideoInputCount = 1;
+function addLocVideoInput() {
+    const wrap = document.getElementById('video-inputs');
+    const idx = locVideoInputCount++;
+    const div = document.createElement('div');
+    div.className = 'flex gap-2 mt-2';
+    div.innerHTML = `<input type="text" id="loc-video-${idx}" placeholder="https://www.youtube.com/watch?v=..." class="flex-1 h-12 px-4 rounded-xl bg-slate-50 border border-slate-100 text-xs font-medium outline-none focus:border-sky-600"><button type="button" onclick="this.parentElement.remove()" class="w-12 h-12 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-trash"></i></button>`;
+    wrap.appendChild(div);
+}
+function toggleOpen24() {
+    const on = document.getElementById('loc-open-24').checked;
+    ['loc-open-from', 'loc-open-to'].forEach(id => { const el = document.getElementById(id); el.disabled = on; el.style.opacity = on ? '0.4' : ''; });
+}
 function submitAddLocation() {
     const name = document.getElementById('loc-name').value.trim();
-    const category = document.getElementById('loc-category').value;
+    const category = Array.from(document.querySelectorAll('.loc-cat-cb')).filter(cb => cb.checked).map(cb => cb.value).join(', ');
     const province = document.getElementById('loc-province').value;
     const lat = parseFloat(document.getElementById('loc-lat').value);
     const lng = parseFloat(document.getElementById('loc-lng').value);
     const price = document.getElementById('loc-price').value.trim();
     const openFrom = document.getElementById('loc-open-from').value;
     const openTo = document.getElementById('loc-open-to').value;
-    const openHours = (openFrom && openTo) ? `${openFrom}-${openTo}` : '';
+    const open24 = !!(document.getElementById('loc-open-24') && document.getElementById('loc-open-24').checked);
+    const openHours = open24 ? '24 Hours' : ((openFrom && openTo) ? `${openFrom}-${openTo}` : '');
     const desc = document.getElementById('loc-desc').value.trim();
     const phone = document.getElementById('loc-phone').value.trim();
     let photos = Array.from(document.querySelectorAll('[id^="photo-url-"]')).map(el => el.value.trim()).filter(Boolean);
     const usedPlaceholder = photos.length === 0;
+    const rawVideos = Array.from(document.querySelectorAll('[id^="loc-video-"]')).map(el => el.value.trim()).filter(Boolean);
+    const parsedVideos = rawVideos.map(parseVideo);
+    const videos = parsedVideos.filter(Boolean).map(v => v.url);
     const pinDest = !!(document.getElementById('loc-pin') && document.getElementById('loc-pin').checked);
     const err = document.getElementById('loc-form-error'), btn = document.getElementById('loc-form-submit');
 
     if (!name || !category || !province || isNaN(lat) || isNaN(lng)) {
         err.textContent = 'Please fill in name, category, province and coordinates.';
+        err.classList.remove('hidden');
+        return;
+    }
+    if (parsedVideos.some(v => !v)) {
+        err.textContent = 'One of the video links is not a valid YouTube, Facebook or TikTok link.';
         err.classList.remove('hidden');
         return;
     }
@@ -1972,13 +2013,13 @@ function submitAddLocation() {
 
     const editId = editingLocId;
     // No photo entered -> save a placeholder token (white image with the category name)
-    const sendPhotos = usedPlaceholder ? [PH_PREFIX + category] : photos;
-    if (usedPlaceholder) photos = [placeholderPhoto(category)];
-    callBackend(editId ? 'updateLocation' : 'addLocation', { id: editId, name, category, province, latitude: lat, longitude: lng, price, openHours, photos: sendPhotos, desc, pinDest, phone })
+    const sendPhotos = usedPlaceholder ? [PH_PREFIX + catFirst(category)] : photos;
+    if (usedPlaceholder) photos = [placeholderPhoto(catFirst(category))];
+    callBackend(editId ? 'updateLocation' : 'addLocation', { id: editId, name, category, province, latitude: lat, longitude: lng, price, openHours, photos: sendPhotos, desc, pinDest, phone, videos })
         .then(res => {
             if (res && res.success) {
-                if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, phone }); }
-                else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, phone, _id: res.id });
+                if (editId) { const t = LOCATIONS.find(l => l._id === editId); if (t) Object.assign(t, { name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, phone, videos }); }
+                else LOCATIONS.push({ name, category, province, latitude: lat, longitude: lng, price, openHours, photos, desc, pinDest, phone, videos, _id: res.id });
                 if (pinDest) LOCATIONS.forEach(x => { if (x.province === province && x.name !== name) x.pinDest = false; });
                 savePinCache();
                 closeAdminContentModal();
@@ -2212,7 +2253,9 @@ function submitRating(name, stars) {
 }
 
 // ===== OPEN HOURS ("HH:MM-HH:MM", handles overnight ranges) =====
+function is24Hours(h) { return /^\s*(24\s*(h|hr|hrs|hours?)?|open\s*24\s*(h|hr|hrs|hours?)?)\s*$/i.test(String(h || '')) || /^\s*00:00\s*-\s*24:00\s*$/.test(String(h || '')); }
 function openStatus(openHours) {
+    if (is24Hours(openHours)) return { open:true, label:'Open 24 Hours', closeIn:null, is24:true };
     if (!openHours || openHours.indexOf('-') === -1) return null;
     const parts = openHours.split('-').map(s => s.trim());
     if (parts.length !== 2) return null;
@@ -2230,6 +2273,7 @@ function openStatus(openHours) {
 function renderOpenBadge(openHours) {
     const st = openStatus(openHours);
     if (!st) return '';
+    if (st.is24) return `<span class="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg"><i class="fa-solid fa-circle-check mr-1"></i>Open 24 Hours</span>`;
     if (!st.open) return `<span class="text-[9px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded-lg"><i class="fa-solid fa-clock mr-1"></i>Closed</span>`;
     if (st.label === 'Closing soon') return `<span class="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg"><i class="fa-solid fa-clock mr-1"></i>Closing in ${st.closeIn}m</span>`;
     return `<span class="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg"><i class="fa-solid fa-circle-check mr-1"></i>Open Now</span>`;
@@ -2279,7 +2323,7 @@ function destinationPhoto(prov) {
     const pinned = list.find(l => l.pinDest);
     if (pinned) return pinned.photos[0];
     if (!remoteLocationsLoaded && pinPhotoCache[prov]) return pinPhotoCache[prov];
-    const best = list.find(l => l.category === 'Things to do' || l.category === 'Temple') || list[0];
+    const best = list.find(l => catHas(l, 'Things to do') || catHas(l, 'Temple')) || list[0];
     return best ? best.photos[0] : '';
 }
 function openDestination(prov) {
@@ -2369,7 +2413,7 @@ function renderHome(container) {
 
 function renderNearbyList() {
     let data = LOCATIONS.map(l=>({...l,distance:parseFloat(calculateDistance(userPos.lat,userPos.lng,l.latitude,l.longitude))}));
-    if (homeFilter!=='All') data=data.filter(l=>l.category===homeFilter);
+    if (homeFilter!=='All') data=data.filter(l=>catHas(l,homeFilter));
     if (homeDistance==='lt1') data=data.filter(l=>l.distance<1);
     else if (homeDistance==='1-5') data=data.filter(l=>l.distance>=1 && l.distance<=5);
     else if (homeDistance==='5-10') data=data.filter(l=>l.distance>5 && l.distance<=10);
@@ -2656,8 +2700,9 @@ function showVideoFallback(yid, reason) {
             <a href="https://www.youtube.com/watch?v=${yid}" target="_blank" rel="noopener" class="px-5 py-3 rounded-2xl bg-red-600 text-white text-[12px] font-black"><i class="fa-brands fa-youtube mr-2"></i>Watch on YouTube</a>
         </div>`;
 }
+const LOC_VIDEO_TMP = {};   // videos attached to a location (opened from its Video tab)
 function openVideo(id) {
-    const v = VIDEOS.find(x => String(x.id) === String(id));
+    const v = VIDEOS.find(x => String(x.id) === String(id)) || LOC_VIDEO_TMP[id];
     if (!v) return;
     const p = parseVideo(v.url);
     if (!p) return;
@@ -2682,6 +2727,7 @@ function openVideo(id) {
     pushModalHistory();
     if (p.type === 'tiktok') mountTikTok(p);
     watchVideoBox();
+    if (v._loc) return;
     // Count one view per device per video
     let seen = false;
     try { seen = !!localStorage.getItem('sv_video_' + v.id); if (!seen) localStorage.setItem('sv_video_' + v.id, '1'); } catch (e) {}
@@ -3037,7 +3083,7 @@ function updateExploreList() {
     let data=LOCATIONS.filter(l=>{
         const matchSearch=l.name.toLowerCase().includes(searchQuery.toLowerCase());
         const matchProv=exProv==='All'||l.province===exProv;
-        const matchCat=exCat==='All'||l.category===exCat;
+        const matchCat=exCat==='All'||catHas(l,exCat);
         return matchSearch&&matchProv&&matchCat;
     });
     // Highest Admin rating first
@@ -4689,12 +4735,12 @@ function generateTrip() {
     if (pool.length === 0) pool = LOCATIONS.slice();
     const foodCats = TRIP_INTERESTS.find(t => t.id === 'Food').cats;
     const isRandom = tripForm.interests.includes('Random');
-    if (isRandom) pool = pool.filter(l => RANDOM_CATS.includes(l.category));
-    const rank = l => (cats.includes(l.category) ? 1 : 0) * 1000 + adminRank(l.name) * 100 + avgRating(l.name) * 10 + Math.min(getLocationViews(l.name), 50);
+    if (isRandom) pool = pool.filter(l => catList(l.category).some(c => RANDOM_CATS.includes(c)));
+    const rank = l => (catList(l.category).some(c => cats.includes(c)) ? 1 : 0) * 1000 + adminRank(l.name) * 100 + avgRating(l.name) * 10 + Math.min(getLocationViews(l.name), 50);
     const shuffle = arr => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
     const order = arr => isRandom ? shuffle(arr) : arr.sort((a, b) => rank(b) - rank(a));
-    const sightPool = order(pool.filter(l => !foodCats.includes(l.category)));
-    const foodPool = order(pool.filter(l => foodCats.includes(l.category)));
+    const sightPool = order(pool.filter(l => !catList(l.category).some(c => foodCats.includes(c))));
+    const foodPool = order(pool.filter(l => catList(l.category).some(c => foodCats.includes(c))));
     const days = Math.max(1, Math.min(14, tripForm.days || 1));
     const usedSights = new Set(), usedFood = new Set();
     const dayList = [];
@@ -4873,7 +4919,8 @@ function shareLocation(name) {
     if (navigator.share) navigator.share({ title: name, text: `Check out ${name} in Cambodia`, url }).catch(()=>{});
     else { navigator.clipboard && navigator.clipboard.writeText(url); alert('Link copied to clipboard.'); }
 }
-async function openDetails(name) {
+async function openDetails(name, opts) {
+    opts = opts || {};
     const loc = LOCATIONS.find(x => x.name === name);
     if (!loc) return;
     // Count view — once per device, shared across devices via Firebase
@@ -4882,16 +4929,17 @@ async function openDetails(name) {
     const modal = document.getElementById('details-modal');
     const body = document.getElementById('modal-body');
     let idx = 0;
-    let dTab = 'about';
+    let dTab = opts.tab || 'about';
     const distanceKm = userPos ? calculateDistance(userPos.lat, userPos.lng, loc.latitude, loc.longitude) : null;
     const askAI = (q) => { closeModal(); switchTab('aiguide'); sendAIMessage(q); };
     window.detailAskAI = (q) => askAI(q);
     window.detailSetTab = (t) => { dTab = t; renderModal(); };
     window.detailToggleFav = () => { toggleFavourite(loc.name); renderModal(); };
+    window.detailGoNearby = (n) => { detailNavStack.push({ name: loc.name, tab: dTab }); openDetails(n); };
 
     const renderTabStrip = () => `
         <div class="flex items-center gap-6 border-b border-slate-100 mb-5">
-            ${[['about','About'],['reviews','Reviews'],['tips','Tips'],['nearby','Nearby']].filter(([id])=>id!=='reviews' || isAdmin()).map(([id,label])=>`
+            ${[['about','About'],['reviews','Reviews'],['tips','Tips'],['nearby','Nearby'],['video','Video']].filter(([id])=>(id!=='reviews' || isAdmin()) && (id!=='video' || (loc.videos && loc.videos.length))).map(([id,label])=>`
                 <button onclick="window.detailSetTab('${id}')" class="pb-3 text-[12px] font-black transition-all ${dTab===id?'text-sky-700 border-b-2 border-sky-700':'text-slate-400'}">${label}</button>
             `).join('')}
         </div>`;
@@ -4936,7 +4984,7 @@ async function openDetails(name) {
     const renderNearbyTab = () => `
         <div class="space-y-3">
             ${nearbyLocations(loc, 6).map(l=>`
-                <div onclick="openDetails('${l.name.replace(/'/g,"\\'")}')" class="flex gap-3 p-3 bg-slate-50 rounded-2xl cursor-pointer">
+                <div onclick="window.detailGoNearby('${l.name.replace(/'/g,"\\'")}')" class="flex gap-3 p-3 bg-slate-50 rounded-2xl cursor-pointer">
                     <img src="${l.photos[0]}" class="w-14 h-14 rounded-xl object-cover flex-shrink-0">
                     <div class="flex-1 min-w-0 flex flex-col justify-center">
                         <h4 class="text-[12px] font-bold text-slate-800 truncate">${l.name}</h4>
@@ -4945,12 +4993,29 @@ async function openDetails(name) {
                 </div>`).join('')}
         </div>`;
 
+    const renderVideoTab = () => {
+        const items = (loc.videos || []).map(parseVideo).filter(Boolean);
+        return `<div class="space-y-3">${items.map((p, i) => {
+            const key = 'locvid:' + i;
+            const v = { id: key, name: loc.name, url: p.url, thumbnail: '', province: loc.province || '', category: loc.category || '', _loc: true };
+            LOC_VIDEO_TMP[key] = v;
+            const pl = VIDEO_PLATFORMS[p.type];
+            return `<div onclick="openVideo('${key}')" class="flex gap-3 p-3 bg-slate-50 rounded-2xl cursor-pointer active:scale-95 transition-all">
+                <div class="w-24 h-16 rounded-xl overflow-hidden flex-shrink-0 relative">${videoThumbHtml(v)}<div class="absolute inset-0 flex items-center justify-center"><i class="fa-solid fa-circle-play text-white text-xl drop-shadow"></i></div></div>
+                <div class="flex-1 min-w-0 flex flex-col justify-center">
+                    <h4 class="text-[12px] font-bold text-slate-800 truncate">${escHtml(loc.name)}</h4>
+                    <p class="text-[10px] text-slate-400"><i class="fa-brands ${pl.icon} mr-1"></i>${pl.label}</p>
+                </div>
+            </div>`;
+        }).join('')}</div>`;
+    };
+
     const renderModal = () => {
-        const tabContent = (dTab==='reviews' && isAdmin()) ? renderReviewsTab() : dTab==='tips' ? renderTipsTab() : dTab==='nearby' ? renderNearbyTab() : renderAboutTab();
+        const tabContent = (dTab==='reviews' && isAdmin()) ? renderReviewsTab() : dTab==='tips' ? renderTipsTab() : dTab==='nearby' ? renderNearbyTab() : dTab==='video' ? renderVideoTab() : renderAboutTab();
         body.innerHTML = `
             <div class="relative h-72 overflow-hidden">
                 <img src="${loc.photos[idx]}" class="w-full h-full object-cover fit-full transition-opacity duration-300">
-                <button onclick="closeModal()" class="absolute top-6 left-6 w-10 h-10 rounded-full bg-black/40 backdrop-blur text-white flex items-center justify-center font-bold text-lg"><i class="fa-solid fa-arrow-left"></i></button>
+                <button onclick="detailBack()" class="absolute top-6 left-6 w-10 h-10 rounded-full bg-black/40 backdrop-blur text-white flex items-center justify-center font-bold text-lg"><i class="fa-solid fa-arrow-left"></i></button>
                 <div class="absolute top-6 right-6 flex gap-2">
                     <button onclick="window.detailToggleFav()" class="w-10 h-10 rounded-full bg-black/40 backdrop-blur text-white flex items-center justify-center">
                         ${isFav(loc.name)?'<i class="fa-solid fa-heart text-rose-400"></i>':'<i class="fa-regular fa-heart"></i>'}
@@ -4991,7 +5056,7 @@ async function openDetails(name) {
     window.setMP = i => { idx=i; renderModal(); };
     renderModal();
     modal.classList.remove('hidden');
-    pushModalHistory();
+    if (!opts.restore) pushModalHistory();
 }
 
 function openEventDetails(title) {
@@ -5012,7 +5077,18 @@ function openEventDetails(title) {
     pushModalHistory();
 }
 
-function closeModal() { document.getElementById('details-modal').classList.add('hidden'); popModalHistory(); }
+// Back arrow in the details popup: return to the previous place (e.g. its Nearby tab) if we came from one, otherwise close.
+function detailBack() {
+    if (detailNavStack.length) { const p = detailNavStack.pop(); openDetails(p.name, { tab: p.tab, restore: true }); popModalHistory(); }
+    else closeModal();
+}
+function closeModal() {
+    document.getElementById('details-modal').classList.add('hidden');
+    const n = detailNavStack.length + 1;
+    detailNavStack = [];
+    if (n > 1 && modalHistoryDepth >= n) { modalHistoryDepth -= n; suppressPopstateClose = true; history.go(-n); }
+    else popModalHistory();
+}
 function toggleDrop(id) {
     const el=document.getElementById('drop-'+id); const arr=document.getElementById('arrow-'+id);
     const visible=el.style.display==='block'; el.style.display=visible?'none':'block';
@@ -5640,6 +5716,11 @@ window.onload = function() {
         ["Open Hours", "ម៉ោងបើក", "营业时间"],
         ["Photos (Cloudinary URLs)", "រូបភាព (តំណ Cloudinary)", "照片（Cloudinary 链接）"],
         ["Add Photo", "បន្ថែមរូបភាព", "添加照片"],
+        ["Add Video", "បន្ថែមវីដេអូ", "添加视频"],
+        ["Video", "វីដេអូ", "视频"],
+        ["Open 24 hours", "បើក ២៤ ម៉ោង", "24小时营业"],
+        ["Open 24 Hours", "បើក ២៤ ម៉ោង", "24小时营业"],
+        ["24 Hours", "២៤ ម៉ោង", "24小时"],
         ["Description", "ការពិពណ៌នា", "描述"],
         ["Save Location", "រក្សាទុកទីតាំង", "保存地点"],
         ["Add Event", "បន្ថែមព្រឹត្តិការណ៍", "添加活动"],
