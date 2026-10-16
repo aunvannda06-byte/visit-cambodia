@@ -9,6 +9,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
     <style>
         :root { --primary: #0369a1; --accent: #f59e0b; --bg-body: #f1f5f9; }
@@ -89,7 +91,7 @@
             #main-content[data-tab="aiguide"] { max-width:760px; margin:0 auto; }
             /* Home: two columns on top */
             .home-top { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:48px; align-items:start; }
-            #main-content[data-tab="home"] .pt-8 .grid-cols-4 { max-width:560px; }
+            #main-content[data-tab="home"] .pt-8 .grid-cols-3 { max-width:560px; }
             /* lists become card grids */
             .list-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
             .list-grid > * { margin:0 !important; }
@@ -227,6 +229,16 @@
     </div>
 </div>
 
+<!-- Compass (full-screen) -->
+<div id="compass-modal" class="fixed inset-0 bg-white z-[2300] hidden overflow-y-auto">
+    <div id="compass-body" class="max-w-[500px] mx-auto min-h-screen p-5 pb-10"></div>
+</div>
+
+<!-- GPS Tracking (full-screen) -->
+<div id="gps-modal" class="fixed inset-0 bg-white z-[2300] hidden overflow-y-auto">
+    <div id="gps-body" class="max-w-[500px] mx-auto min-h-screen p-5 pb-10"></div>
+</div>
+
 <script>
 // ===== MOBILE BACK BUTTON: close modals instead of leaving the app =====
 // Every time a modal/sheet opens we push one history entry. Pressing the phone's
@@ -278,6 +290,8 @@ function closeTopmostModalSilently() {
         ['video-modal', el => { destroyYtPlayer(); el.classList.add('hidden'); document.getElementById('video-modal-body').innerHTML = ''; }],
         ['admin-content-modal', el => el.classList.add('hidden')],
         ['login-modal', el => el.style.display = 'none'],
+        ['gps-modal', el => window.__closeGpsSilently()],
+        ['compass-modal', el => window.__closeCompassSilently()],
         ['weather-modal', el => el.classList.add('hidden')],
         ['plantrip-modal', el => el.classList.add('hidden')],
         ['info-modal', el => el.classList.add('hidden')],
@@ -2373,13 +2387,13 @@ function renderHome(container) {
         </div><div class="home-col">
         <div class="mb-8">
             <h3 class="text-sm font-bold text-slate-800 mb-5">Quick Access</h3>
-            <div class="grid grid-cols-4 gap-3">
-                ${[{id:'plantrip',label:'Plan My Trip',i:'fa-calendar-days',color:'bg-sky-600',action:'openPlanTrip()'},{id:'foodguide',label:'Food Guide',i:'fa-utensils',color:'bg-amber-500',action:'openFoodGuide()'},{id:'weather',label:'Weather',i:'fa-cloud-sun',color:'bg-cyan-500',action:'openWeather()'},{id:'emergency',label:'Emergency',i:'fa-triangle-exclamation',color:'bg-rose-600',action:'openEmergency()'}].map(item=>`
+            <div class="grid grid-cols-3 gap-3">
+                ${[{id:'plantrip',label:'Plan My Trip',i:'fa-calendar-days',color:'bg-sky-600',action:'openPlanTrip()'},{id:'foodguide',label:'Food Guide',i:'fa-utensils',color:'bg-amber-500',action:'openFoodGuide()'},{id:'weather',label:'Weather',i:'fa-cloud-sun',color:'bg-cyan-500',action:'openWeather()'},{id:'emergency',label:'Emergency',i:'fa-triangle-exclamation',color:'bg-rose-600',action:'openEmergency()'},{id:'compass',label:'Compass',i:'fa-compass',color:'bg-emerald-600',action:'openCompass()'},{id:'gpstrack',label:'GPS Tracking',i:'fa-route',color:'bg-indigo-600',action:'openGpsTrack()'}].map(item=>`
                     <div onclick="${item.action}" class="flex flex-col items-center gap-2 cursor-pointer active:scale-95 transition-all">
                         <div class="w-14 h-14 rounded-2xl flex items-center justify-center ${item.color} text-white shadow-md">
                             <i class="fa-solid ${item.i} text-xl"></i>
                         </div>
-                        <span class="text-[9px] font-bold text-slate-500 text-center leading-tight">${item.label}</span>
+                        <span class="text-[10px] font-bold text-slate-500 text-center leading-tight">${item.label}</span>
                     </div>`).join('')}
             </div>
         </div>
@@ -5395,6 +5409,69 @@ window.onload = function() {
 
         // ---------- Header, tab bar, tagline ----------
     add([
+        ["Digital Compass", "ត្រីវិស័យឌីជីថល", "数字指南针"],
+        ["Compass", "ត្រីវិស័យ", "指南针"],
+        ["GPS Tracking", "តាមដាន GPS", "GPS 追踪"],
+        ["Waiting for compass...", "កំពុងរង់ចាំត្រីវិស័យ...", "等待指南针..."],
+        ["Latitude", "រយៈទទឹង", "纬度"],
+        ["Longitude", "រយៈបណ្តោយ", "经度"],
+        ["Getting GPS location...", "កំពុងស្វែងរកទីតាំង GPS...", "正在获取 GPS 位置..."],
+        ["Point to a destination", "ចង្អុលទៅគោលដៅ", "指向目的地"],
+        ["None", "គ្មាន", "无"],
+        ["How to calibrate the compass", "របៀបកែត្រីវិស័យ", "如何校准指南针"],
+        ["Calibrate your compass", "កែត្រីវិស័យរបស់អ្នក", "校准你的指南针"],
+        ["1. Hold your phone flat and move it in a figure-8 motion 3-4 times, rotating your wrist.", "១. កាន់ទូរសព្ទដាក់ផ្ទាល់ដី ហើយគូសរូបលេខ ៨ ចំនួន ៣-៤ ដង ដោយបង្វិលកដៃ។", "1. 将手机平放，转动手腕，画 3-4 次“8”字。"],
+        ["2. Keep away from metal, magnets, phone cases with magnets, cars and power lines.", "២. ចៀសឱ្យឆ្ងាយពីលោហៈ មេដែក ស្រោមទូរសព្ទមានមេដែក រថយន្ត និងខ្សែភ្លើង។", "2. 远离金属、磁铁、带磁吸的手机壳、汽车和电线。"],
+        ["3. Hold the phone flat and level while reading the direction.", "៣. កាន់ទូរសព្ទឱ្យស្មើ ពេលអានទិស។", "3. 读取方向时请保持手机水平。"],
+        ["4. On Android you can also open Google Maps and follow its calibration prompt.", "៤. លើ Android អ្នកក៏អាចបើក Google Maps ហើយធ្វើតាមការណែនាំកែត្រីវិស័យ។", "4. 在安卓上也可打开谷歌地图并按提示校准。"],
+        ["Do not rely on this compass alone in forests or mountains. Carry a map and tell someone your route.", "កុំពឹងលើត្រីវិស័យនេះតែមួយមុខក្នុងព្រៃ ឬភ្នំ។ ត្រូវយកផែនទី ហើយប្រាប់អ្នកផ្សេងអំពីផ្លូវរបស់អ្នក។", "在森林或山区请勿只依赖此指南针，请携带地图并告知他人你的路线。"],
+        ["GPS Track: Start Point", "ដំណើរ GPS៖ ចំណុចចាប់ផ្តើម", "GPS 轨迹：起点"],
+        ["GPS Track: End Point", "ដំណើរ GPS៖ ចំណុចបញ្ចប់", "GPS 轨迹：终点"],
+        ["GPS accuracy", "ភាពត្រឹមត្រូវ GPS", "GPS 精度"],
+        ["Start Point", "ចំណុចចាប់ផ្តើម", "起点"],
+        ["End Point", "ចំណុចបញ្ចប់", "终点"],
+        ["Mode 1", "របៀប ១", "模式 1"],
+        ["Mode 2", "របៀប ២", "模式 2"],
+        ["Start Point + End Point", "ចំណុចចាប់ផ្តើម + ចំណុចបញ្ចប់", "起点 + 终点"],
+        ["Start Point + Auto End Point", "ចំណុចចាប់ផ្តើម + ចំណុចបញ្ចប់ស្វ័យប្រវត្តិ", "起点 + 自动终点"],
+        ["Tap the map to choose your Start Point, then your End Point.", "ចុចលើផែនទីដើម្បីជ្រើសចំណុចចាប់ផ្តើម រួចចំណុចបញ្ចប់។", "点击地图选择起点，然后选择终点。"],
+        ["Use my location for selected point", "ប្រើទីតាំងខ្ញុំសម្រាប់ចំណុចដែលបានជ្រើស", "将我的位置用于所选点"],
+        ["Select both points to continue", "ជ្រើសចំណុចទាំងពីរដើម្បីបន្ត", "请选择两个点以继续"],
+        ["Straight-line distance", "ចម្ងាយបន្ទាត់ត្រង់", "直线距离"],
+        ["Start Tracking", "ចាប់ផ្តើមតាមដាន", "开始追踪"],
+        ["Tracking...", "កំពុងតាមដាន...", "追踪中..."],
+        ["Recording GPS", "កំពុងកត់ត្រា GPS", "正在记录 GPS"],
+        ["Distance", "ចម្ងាយ", "距离"],
+        ["Time", "ពេលវេលា", "时间"],
+        ["Points", "ចំណុច", "点数"],
+        ["Accuracy", "ភាពត្រឹមត្រូវ", "精度"],
+        ["To End Point", "ទៅចំណុចបញ្ចប់", "距终点"],
+        ["From Start", "ពីចំណុចចាប់ផ្តើម", "距起点"],
+        ["Finish", "បញ្ចប់", "完成"],
+        ["Keep tracking & close", "បន្តតាមដាន ហើយបិទ", "继续追踪并关闭"],
+        ["Cancel and discard track", "បោះបង់ និងលុបដំណើរ", "取消并丢弃轨迹"],
+        ["Keep tracking working", "ធ្វើឱ្យការតាមដានដំណើរការ", "保持追踪正常运行"],
+        ["Journey Result", "លទ្ធផលដំណើរ", "旅程结果"],
+        ["Total Distance", "ចម្ងាយសរុប", "总距离"],
+        ["Elapsed Time", "រយៈពេលកន្លងទៅ", "用时"],
+        ["GPS Points", "ចំណុច GPS", "GPS 点数"],
+        ["Avg Speed", "ល្បឿនមធ្យម", "平均速度"],
+        ["Signal gaps", "ការដាច់សញ្ញា", "信号中断"],
+        ["GPS points & route", "ចំណុច GPS និងផ្លូវ", "GPS 点与路线"],
+        ["Save route as GPX file", "រក្សាទុកផ្លូវជាឯកសារ GPX", "将路线保存为 GPX 文件"],
+        ["New Track", "ដំណើរថ្មី", "新轨迹"],
+        ["GPS tracking", "ការតាមដាន GPS", "GPS 追踪"],
+        ["Map could not load. Check your internet connection.", "មិនអាចផ្ទុកផែនទី។ សូមពិនិត្យអ៊ីនធឺណិត។", "地图无法加载，请检查网络连接。"],
+        ["You have reached your End Point. Tap Finish to see your journey.", "អ្នកបានមកដល់ចំណុចបញ្ចប់។ ចុច បញ្ចប់ ដើម្បីមើលដំណើរ។", "你已到达终点。点击“完成”查看旅程。"],
+        ["Discard this track? This cannot be undone.", "លុបដំណើរនេះ? មិនអាចត្រឡប់វិញបានទេ។", "丢弃此轨迹？此操作无法撤销。"],
+        ["Please select both the Start Point and End Point on the map.", "សូមជ្រើសរើសទាំងចំណុចចាប់ផ្តើម និងចំណុចបញ្ចប់លើផែនទី។", "请在地图上选择起点和终点。"],
+        ["Location permission denied. Allow location access to see coordinates.", "ការអនុញ្ញាតទីតាំងត្រូវបានបដិសេធ។ សូមអនុញ្ញាតដើម្បីមើលកូអរដោនេ។", "位置权限被拒绝。请允许定位以查看坐标。"],
+        ["GPS signal not available.", "គ្មានសញ្ញា GPS។", "无 GPS 信号。"],
+        ["Waiting for GPS to point to the destination...", "កំពុងរង់ចាំ GPS ដើម្បីចង្អុលទៅគោលដៅ...", "等待 GPS 以指向目的地..."],
+        ["Compass accuracy is low. Move your phone in a figure-8 to calibrate it (see instructions below).", "ភាពត្រឹមត្រូវត្រីវិស័យទាប។ គូសរូបលេខ ៨ ដើម្បីកែ (មើលការណែនាំខាងក្រោម)។", "指南针精度较低。请画“8”字校准（见下方说明）。"],
+        ["GPS is not supported on this device.", "ឧបករណ៍នេះមិនគាំទ្រ GPS ទេ។", "此设备不支持 GPS。"]
+    ]);
+    add([
         ["Your Gateway to Cambodia — Where Every Journey Tells a Story.", "ច្រកទ្វារទៅកាន់កម្ពុជា — ដែលរាល់ដំណើរតែងតែនិទានរឿងមួយ។", "通往柬埔寨的门户 — 每一段旅程，都是一个故事。"],
         ["Home", "ទំព័រដើម", "首页"],
         ["AI Guide", "ជំនួយ AI", "AI向导"],
@@ -6281,6 +6358,533 @@ window.onload = function() {
         document.addEventListener('DOMContentLoaded', function () { mo.observe(document.body, { childList: true }); });
     } catch (e) {}
     var n = 0, t = setInterval(function () { sweep(); if (++n > 100) clearInterval(t); }, 300);
+})();
+</script>
+<script>
+// ===== QUICK ACCESS: DIGITAL COMPASS + GPS TRACKING =====
+(function () {
+    const $ = id => document.getElementById(id);
+    const tr = s => (window.trI18n ? window.trI18n(s) : s);
+    const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+    const safeLS = {
+        get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+        set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+        del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    };
+    // metres between two points (Haversine)
+    function distM(a, b) {
+        const R = 6371000, dLat = rad(b.lat - a.lat), dLon = rad(b.lng - a.lng);
+        const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+    function bearingTo(a, b) {
+        const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat));
+        const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng));
+        return (deg(Math.atan2(y, x)) + 360) % 360;
+    }
+    function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' km' : Math.round(m) + ' m'; }
+    function fmtDur(ms) {
+        const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+        return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(ss).padStart(2, '0');
+    }
+    function fmtCoord(v, pos, neg) { return Math.abs(v).toFixed(5) + '° ' + (v >= 0 ? pos : neg); }
+    function cardinal(h) { return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(h / 45) % 8]; }
+    function toast(msg) { try { alert(tr(msg)); } catch (e) {} }
+
+    // =====================================================================
+    //  DIGITAL COMPASS
+    // =====================================================================
+    const C = { on: false, heading: null, smooth: null, acc: null, absolute: false, gotEvent: false, pos: null, geoId: null,
+                target: null, calibOpen: false, checkTimer: null, raf: null };
+
+    window.closeCompass = function () { stopCompass(); $('compass-modal').classList.add('hidden'); popModalHistory(); };
+    window.__closeCompassSilently = function () { stopCompass(); $('compass-modal').classList.add('hidden'); };
+
+    window.openCompass = function () {
+        $('compass-modal').classList.remove('hidden');
+        pushModalHistory();
+        C.target = null; C.calibOpen = false; C.gotEvent = false; C.heading = null; C.smooth = null; C.acc = null;
+        renderCompass();
+        startCompass(); // runs inside the tap gesture (needed by iOS for the sensor permission)
+    };
+
+    function targetList() {
+        const list = [];
+        const t = loadTrack();
+        if (t && t.start) list.push({ key: 'start', name: tr('GPS Track: Start Point'), lat: t.start.lat, lng: t.start.lng });
+        if (t && t.plannedEnd) list.push({ key: 'end', name: tr('GPS Track: End Point'), lat: t.plannedEnd.lat, lng: t.plannedEnd.lng });
+        let places = (typeof LOCATIONS !== 'undefined' ? LOCATIONS : []).filter(l => isFinite(l.latitude) && isFinite(l.longitude));
+        const ref = C.pos || (typeof userPos !== 'undefined' ? userPos : null);
+        if (ref) places = places.map(l => ({ l, d: distM(ref, { lat: l.latitude, lng: l.longitude }) })).sort((a, b) => a.d - b.d).slice(0, 40).map(x => x.l);
+        else places = places.slice(0, 40);
+        places.forEach((l, i) => list.push({ key: 'p' + i, name: l.name, lat: l.latitude, lng: l.longitude }));
+        return list;
+    }
+
+    function renderCompass() {
+        const ticks = [];
+        for (let a = 0; a < 360; a += 10) {
+            const major = a % 90 === 0, mid = a % 30 === 0;
+            ticks.push(`<line x1="150" y1="${major ? 14 : 14}" x2="150" y2="${major ? 34 : mid ? 28 : 22}" stroke="${major ? '#0f172a' : '#94a3b8'}" stroke-width="${major ? 3 : 1.5}" transform="rotate(${a} 150 150)"/>`);
+        }
+        const letters = [['N', 0, '#e11d48'], ['E', 90, '#0f172a'], ['S', 180, '#0f172a'], ['W', 270, '#0f172a']].map(([t, a, c]) =>
+            `<text x="150" y="62" text-anchor="middle" font-size="26" font-weight="800" fill="${c}" transform="rotate(${a} 150 150)"><tspan transform="rotate(${-a} 150 62)">${t}</tspan></text>`).join('');
+        const opts = targetList().map(t => `<option value="${escHtml(t.key)}" ${C.target && C.target.key === t.key ? 'selected' : ''}>${escHtml(t.name)}</option>`).join('');
+        $('compass-body').innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+            <div><p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Quick Access</p><h3 class="text-lg font-black text-slate-800">Digital Compass</h3></div>
+            <button onclick="closeCompass()" class="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid fa-xmark text-slate-400"></i></button>
+        </div>
+        <div id="cmp-warn" class="hidden mb-3 rounded-2xl p-3 text-[11px] font-bold"></div>
+        <div class="text-center mb-2">
+            <p id="cmp-deg" class="text-5xl font-black text-slate-800">--°</p>
+            <p id="cmp-card" class="text-sm font-bold text-sky-700">Waiting for compass...</p>
+        </div>
+        <div class="relative mx-auto" style="width:min(88vw,330px);aspect-ratio:1">
+            <div class="absolute left-1/2 -top-1 -translate-x-1/2 z-10 w-0 h-0" style="border-left:9px solid transparent;border-right:9px solid transparent;border-top:16px solid #e11d48"></div>
+            <svg id="cmp-dial" viewBox="0 0 300 300" class="w-full h-full" style="transition:transform .12s linear">
+                <circle cx="150" cy="150" r="146" fill="#f8fafc" stroke="#cbd5e1" stroke-width="3"/>
+                ${ticks.join('')}${letters}
+                <circle cx="150" cy="150" r="6" fill="#0369a1"/>
+            </svg>
+            <svg id="cmp-target" viewBox="0 0 300 300" class="absolute inset-0 w-full h-full pointer-events-none hidden" style="transition:transform .12s linear">
+                <polygon points="150,70 138,112 162,112" fill="#f59e0b" stroke="#b45309" stroke-width="2"/>
+                <line x1="150" y1="112" x2="150" y2="150" stroke="#f59e0b" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mt-4">
+            <div class="bg-slate-50 rounded-2xl p-3"><p class="text-[8px] text-slate-400 font-bold uppercase">Latitude</p><p id="cmp-lat" class="text-xs font-black text-slate-700">--</p></div>
+            <div class="bg-slate-50 rounded-2xl p-3"><p class="text-[8px] text-slate-400 font-bold uppercase">Longitude</p><p id="cmp-lng" class="text-xs font-black text-slate-700">--</p></div>
+        </div>
+        <p id="cmp-gpsacc" class="text-[10px] text-slate-400 font-semibold text-center mt-2">Getting GPS location...</p>
+        <div class="mt-4 bg-amber-50 border border-amber-100 rounded-2xl p-3">
+            <p class="text-[10px] font-black text-amber-700 uppercase tracking-wider mb-2"><i class="fa-solid fa-location-arrow mr-1"></i>Point to a destination</p>
+            <select id="cmp-target-sel" onchange="compassPickTarget(this.value)" class="w-full bg-white border border-amber-200 rounded-xl p-2 text-xs font-bold text-slate-700">
+                <option value="">None</option>${opts}
+            </select>
+            <p id="cmp-tinfo" class="text-xs font-black text-amber-800 mt-2 hidden"></p>
+        </div>
+        <button onclick="compassToggleCalib()" class="w-full mt-3 py-3 rounded-2xl bg-slate-100 text-xs font-black text-slate-600"><i class="fa-solid fa-circle-info mr-1"></i>How to calibrate the compass</button>
+        <div id="cmp-calib" class="hidden mt-3 bg-sky-50 border border-sky-100 rounded-2xl p-4 text-[11px] font-semibold text-slate-600 leading-relaxed">
+            <p class="font-black text-sky-800 mb-1">Calibrate your compass</p>
+            <p>1. Hold your phone flat and move it in a figure-8 motion 3-4 times, rotating your wrist.</p>
+            <p>2. Keep away from metal, magnets, phone cases with magnets, cars and power lines.</p>
+            <p>3. Hold the phone flat and level while reading the direction.</p>
+            <p>4. On Android you can also open Google Maps and follow its calibration prompt.</p>
+            <svg viewBox="0 0 120 50" class="w-24 mx-auto mt-2"><path d="M60 25c-10-18-35-18-35 0s25 18 35 0 35-18 35 0-25 18-35 0z" fill="none" stroke="#0369a1" stroke-width="3" stroke-linecap="round"/></svg>
+        </div>
+        <p class="text-[10px] text-slate-400 font-semibold text-center mt-4">Do not rely on this compass alone in forests or mountains. Carry a map and tell someone your route.</p>`;
+    }
+
+    window.compassToggleCalib = function () { const e = $('cmp-calib'); if (e) e.classList.toggle('hidden'); };
+    window.compassPickTarget = function (key) {
+        C.target = key ? targetList().find(t => t.key === key) || null : null;
+        if (!C.target) { const t = $('cmp-target'); if (t) t.classList.add('hidden'); }
+        updateCompassUI();
+    };
+
+    function screenAngle() { try { return (screen.orientation && screen.orientation.angle) || window.orientation || 0; } catch (e) { return 0; } }
+
+    function onOrient(e) {
+        let h = null, acc = null;
+        if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
+            h = e.webkitCompassHeading; // iOS: already relative to magnetic north
+            if (typeof e.webkitCompassAccuracy === 'number') acc = e.webkitCompassAccuracy;
+            C.absolute = true;
+        } else if (e.alpha != null && (e.absolute || e.type === 'deviceorientationabsolute')) {
+            h = (360 - e.alpha + screenAngle()) % 360; C.absolute = true;
+        } else if (e.alpha != null && !C.absolute) {
+            h = (360 - e.alpha + screenAngle()) % 360; // relative only: may not point to true north
+        }
+        if (h == null) return;
+        C.gotEvent = true; C.acc = acc;
+        // smooth around the circle
+        if (C.smooth == null) C.smooth = h;
+        else { let d = ((h - C.smooth + 540) % 360) - 180; C.smooth = (C.smooth + d * 0.25 + 360) % 360; }
+        C.heading = C.smooth;
+        if (!C.raf) C.raf = requestAnimationFrame(() => { C.raf = null; updateCompassUI(); });
+    }
+
+    function startCompass() {
+        if (C.on) return;
+        const attach = () => {
+            C.on = true;
+            window.addEventListener('deviceorientationabsolute', onOrient, true);
+            window.addEventListener('deviceorientation', onOrient, true);
+            C.checkTimer = setTimeout(() => { if (!C.gotEvent) showCompassWarn('No compass sensor was found or access is blocked. Make sure your device has a compass, the page uses HTTPS, and motion/orientation access is allowed.', 'rose'); }, 2500);
+        };
+        try {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission().then(r => {
+                    if (r === 'granted') attach();
+                    else showCompassWarn('Motion & Orientation access was denied. On iPhone: Settings > Safari > Motion & Orientation Access, then reopen the compass.', 'rose');
+                }).catch(() => showCompassWarn('Could not ask for compass permission. Tap the compass tile again.', 'rose'));
+            } else attach();
+        } catch (e) { attach(); }
+        startCompassGps();
+    }
+
+    function startCompassGps() {
+        if (!navigator.geolocation || C.geoId != null) return;
+        C.geoId = navigator.geolocation.watchPosition(p => {
+            C.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+            if (!C.gotEvent && p.coords.heading != null && !isNaN(p.coords.heading) && (p.coords.speed || 0) > 1) { C.heading = p.coords.heading; C.smooth = C.heading; }
+            updateCompassUI();
+        }, err => {
+            const el = $('cmp-gpsacc'); if (el) el.textContent = err.code === 1 ? tr('Location permission denied. Allow location access to see coordinates.') : tr('GPS signal not available.');
+        }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+    }
+
+    function stopCompass() {
+        window.removeEventListener('deviceorientationabsolute', onOrient, true);
+        window.removeEventListener('deviceorientation', onOrient, true);
+        if (C.geoId != null) { try { navigator.geolocation.clearWatch(C.geoId); } catch (e) {} C.geoId = null; }
+        clearTimeout(C.checkTimer); C.on = false;
+    }
+
+    function showCompassWarn(msg, tone) {
+        const w = $('cmp-warn'); if (!w) return;
+        w.className = 'mb-3 rounded-2xl p-3 text-[11px] font-bold ' + (tone === 'rose' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 'bg-amber-50 text-amber-800 border border-amber-100');
+        w.textContent = tr(msg);
+    }
+
+    function updateCompassUI() {
+        if (!$('cmp-dial')) return;
+        if (C.heading != null) {
+            $('cmp-dial').style.transform = `rotate(${-C.heading}deg)`;
+            $('cmp-deg').textContent = Math.round(C.heading) % 360 + '°';
+            $('cmp-card').textContent = cardinal(C.heading);
+            const poor = (C.acc != null && (C.acc < 0 || C.acc > 25)) || (!C.absolute && C.gotEvent);
+            if (poor) { showCompassWarn(C.acc != null ? 'Compass accuracy is low. Move your phone in a figure-8 to calibrate it (see instructions below).' : 'This device gives a relative compass that may not point to true north. Calibrate with a figure-8 motion.', 'amber'); }
+            else { const w = $('cmp-warn'); if (w) w.classList.add('hidden'); }
+        }
+        if (C.pos) {
+            $('cmp-lat').textContent = fmtCoord(C.pos.lat, 'N', 'S');
+            $('cmp-lng').textContent = fmtCoord(C.pos.lng, 'E', 'W');
+            $('cmp-gpsacc').textContent = tr('GPS accuracy') + ' ±' + Math.round(C.pos.acc) + ' m';
+        }
+        const info = $('cmp-tinfo'), arrow = $('cmp-target');
+        if (C.target && C.pos) {
+            const b = bearingTo(C.pos, C.target), d = distM(C.pos, C.target);
+            info.classList.remove('hidden');
+            info.textContent = C.target.name.split(' - ').pop() + ' · ' + fmtDist(d) + ' · ' + Math.round(b) + '° ' + cardinal(b);
+            if (C.heading != null) { arrow.classList.remove('hidden'); arrow.style.transform = `rotate(${b - C.heading}deg)`; }
+            else { arrow.classList.remove('hidden'); arrow.style.transform = `rotate(${b}deg)`; }
+        } else if (C.target) { info.classList.remove('hidden'); info.textContent = tr('Waiting for GPS to point to the destination...'); arrow.classList.add('hidden'); }
+        else { info.classList.add('hidden'); arrow.classList.add('hidden'); }
+    }
+
+    // =====================================================================
+    //  GPS TRACKING
+    // =====================================================================
+    const KEY = 'vc_gps_track_v1';
+    const G = { map: null, layer: null, watchId: null, wake: null, timer: null, live: null, picking: 'start', setup: { mode: 1, start: null, end: null }, lastPointAt: 0, mapMarkers: {} };
+    let TRACK = null;
+
+    function loadTrack() { if (TRACK) return TRACK; try { TRACK = JSON.parse(safeLS.get(KEY) || 'null'); } catch (e) { TRACK = null; } return TRACK; }
+    function saveTrack() { if (TRACK) safeLS.set(KEY, JSON.stringify(TRACK)); else safeLS.del(KEY); }
+    function trackDistance(t) { let d = 0; for (let i = 1; i < t.points.length; i++) d += distM(t.points[i - 1], t.points[i]); return d; }
+    function trackElapsed(t) { return ((t.endedAt || Date.now()) - t.startedAt); }
+
+    window.closeGpsTrack = function () { gpsHideMap(); $('gps-modal').classList.add('hidden'); popModalHistory(); updatePill(); };
+    window.__closeGpsSilently = function () { gpsHideMap(); $('gps-modal').classList.add('hidden'); updatePill(); };
+
+    window.openGpsTrack = function () {
+        $('gps-modal').classList.remove('hidden');
+        pushModalHistory();
+        const t = loadTrack();
+        if (t && t.status === 'tracking') { if (G.watchId == null) beginWatching(); renderGpsLive(); }
+        else if (t && t.status === 'finished') renderGpsResult();
+        else renderGpsSetup();
+        updatePill();
+    };
+
+    function hasLeaflet() { return typeof window.L !== 'undefined' && L.map; }
+    function gpsHideMap() { if (G.map) { try { G.map.remove(); } catch (e) {} G.map = null; G.layer = null; G.mapMarkers = {}; } clearInterval(G.timer); G.timer = null; }
+
+    function head(title, sub) {
+        return `<div class="flex justify-between items-center mb-4">
+            <div><p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">${sub}</p><h3 class="text-lg font-black text-slate-800">${title}</h3></div>
+            <button onclick="closeGpsTrack()" class="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid fa-xmark text-slate-400"></i></button></div>`;
+    }
+    const BG_NOTE = `<div class="mt-4 bg-amber-50 border border-amber-100 rounded-2xl p-3 text-[10px] font-semibold text-amber-800 leading-relaxed">
+        <p class="font-black mb-1"><i class="fa-solid fa-mobile-screen mr-1"></i>Keep tracking working</p>
+        <p>Allow Location access (choose "Always" or "Allow while using" and Precise). Keep this app open, add it to your Home Screen, and turn off battery saver. The screen is kept awake while tracking. Locking the phone may pause GPS in a browser; points are saved and tracking resumes when you reopen the app.</p></div>`;
+
+    // ---------- setup ----------
+    function renderGpsSetup() {
+        gpsHideMap();
+        const s = G.setup, m = s.mode;
+        $('gps-body').innerHTML = head('GPS Tracking', 'Quick Access') + `
+        <div class="grid grid-cols-2 gap-2 mb-4">
+            <button onclick="gpsSetMode(1)" class="p-3 rounded-2xl border-2 text-left ${m === 1 ? 'border-sky-600 bg-sky-50' : 'border-slate-100 bg-white'}"><p class="text-[11px] font-black text-slate-800">Mode 1</p><p class="text-[10px] font-semibold text-slate-500">Start Point + End Point</p></button>
+            <button onclick="gpsSetMode(2)" class="p-3 rounded-2xl border-2 text-left ${m === 2 ? 'border-sky-600 bg-sky-50' : 'border-slate-100 bg-white'}"><p class="text-[11px] font-black text-slate-800">Mode 2</p><p class="text-[10px] font-semibold text-slate-500">Start Point + Auto End Point</p></button>
+        </div>
+        ${m === 1 ? `
+            <p class="text-[11px] font-semibold text-slate-500 mb-2">Tap the map to choose your Start Point, then your End Point.</p>
+            <div class="flex gap-2 mb-2">
+                <button id="gps-pick-start" onclick="gpsPick('start')" class="flex-1 py-2 rounded-xl text-[11px] font-black"></button>
+                <button id="gps-pick-end" onclick="gpsPick('end')" class="flex-1 py-2 rounded-xl text-[11px] font-black"></button>
+            </div>
+            <button onclick="gpsUseMyLoc()" class="w-full mb-2 py-2 rounded-xl bg-slate-100 text-[11px] font-black text-slate-600"><i class="fa-solid fa-crosshairs mr-1"></i>Use my location for selected point</button>
+            <div id="gps-map" class="w-full rounded-2xl overflow-hidden border border-slate-200" style="height:300px;isolation:isolate"></div>
+            <p id="gps-setup-info" class="text-[11px] font-bold text-slate-500 text-center mt-2"></p>
+            <button onclick="gpsBegin()" class="w-full mt-3 py-4 rounded-2xl bg-sky-600 text-white text-sm font-black shadow-md active:scale-95"><i class="fa-solid fa-play mr-2"></i>Start Tracking</button>
+        ` : `
+            <div class="bg-sky-50 border border-sky-100 rounded-2xl p-4 text-[11px] font-semibold text-slate-600 mb-4 leading-relaxed">Tap <b>Start Point</b> to begin recording where you are. When you tap <b>Finish</b>, your current GPS location automatically becomes the End Point.</div>
+            <button onclick="gpsBegin()" class="w-full py-5 rounded-2xl bg-emerald-600 text-white text-base font-black shadow-md active:scale-95"><i class="fa-solid fa-location-dot mr-2"></i>Start Point</button>
+        `}
+        ${BG_NOTE}`;
+        if (m === 1) { initMap('gps-map', true); refreshSetupMap(); }
+    }
+    window.gpsSetMode = function (m) { G.setup.mode = m; renderGpsSetup(); };
+    window.gpsPick = function (w) { G.picking = w; refreshSetupMap(); };
+
+    function initMap(id, clickable) {
+        const el = $(id);
+        if (!hasLeaflet()) { el.innerHTML = `<div class="h-full flex items-center justify-center text-center p-4 text-[11px] font-bold text-slate-400">${tr('Map could not load. Check your internet connection.')}</div>`; return; }
+        const ref = (typeof userPos !== 'undefined' && userPos) ? [userPos.lat, userPos.lng] : [12.5657, 104.991];
+        G.map = L.map(id, { zoomControl: true }).setView(ref, (typeof userPos !== 'undefined' && userPos) ? 15 : 7);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(G.map);
+        G.layer = L.layerGroup().addTo(G.map);
+        if (clickable) G.map.on('click', e => {
+            G.setup[G.picking] = { lat: e.latlng.lat, lng: e.latlng.lng };
+            if (G.picking === 'start' && !G.setup.end) G.picking = 'end';
+            refreshSetupMap();
+        });
+        setTimeout(() => G.map && G.map.invalidateSize(), 200);
+    }
+    function pin(color, label) {
+        return L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)">${label}</div>` });
+    }
+    function refreshSetupMap() {
+        const s = G.setup;
+        const bs = $('gps-pick-start'), be = $('gps-pick-end');
+        if (bs) { bs.className = 'flex-1 py-2 rounded-xl text-[11px] font-black ' + (G.picking === 'start' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'); bs.textContent = tr('Start Point') + (s.start ? ' ✓' : ''); }
+        if (be) { be.className = 'flex-1 py-2 rounded-xl text-[11px] font-black ' + (G.picking === 'end' ? 'bg-rose-600 text-white' : 'bg-rose-50 text-rose-700'); be.textContent = tr('End Point') + (s.end ? ' ✓' : ''); }
+        if (G.layer) {
+            G.layer.clearLayers();
+            if (s.start) L.marker([s.start.lat, s.start.lng], { icon: pin('#059669', 'S') }).addTo(G.layer);
+            if (s.end) L.marker([s.end.lat, s.end.lng], { icon: pin('#e11d48', 'E') }).addTo(G.layer);
+            if (s.start && s.end) L.polyline([[s.start.lat, s.start.lng], [s.end.lat, s.end.lng]], { color: '#94a3b8', dashArray: '6 8', weight: 3 }).addTo(G.layer);
+        }
+        const info = $('gps-setup-info');
+        if (info) info.textContent = s.start && s.end ? tr('Straight-line distance') + ': ' + fmtDist(distM(s.start, s.end)) : tr('Select both points to continue');
+    }
+    window.gpsUseMyLoc = function () {
+        if (!navigator.geolocation) return toast('GPS is not supported on this device.');
+        navigator.geolocation.getCurrentPosition(p => {
+            G.setup[G.picking] = { lat: p.coords.latitude, lng: p.coords.longitude };
+            if (G.map) G.map.setView([p.coords.latitude, p.coords.longitude], 16);
+            refreshSetupMap();
+        }, () => toast('Could not get your location. Allow location access and try again.'), { enableHighAccuracy: true, timeout: 15000 });
+    };
+
+    // ---------- start ----------
+    window.gpsBegin = function () {
+        if (!navigator.geolocation) return toast('GPS is not supported on this device.');
+        const mode = G.setup.mode;
+        if (mode === 1 && !(G.setup.start && G.setup.end)) return toast('Please select both the Start Point and End Point on the map.');
+        navigator.geolocation.getCurrentPosition(p => {
+            const now = Date.now(), here = { lat: p.coords.latitude, lng: p.coords.longitude, t: now, acc: p.coords.accuracy };
+            const start = mode === 1 ? { lat: G.setup.start.lat, lng: G.setup.start.lng, t: now } : here;
+            TRACK = { mode, status: 'tracking', startedAt: now, endedAt: null, start, plannedEnd: mode === 1 ? { lat: G.setup.end.lat, lng: G.setup.end.lng } : null, end: null, points: [here], gaps: [] };
+            saveTrack(); beginWatching(); renderGpsLive(); updatePill();
+        }, err => toast(err.code === 1 ? 'Location permission denied. Allow location access in your browser/phone settings, then try again.' : 'Could not get a GPS fix. Move to an open area and try again.'), { enableHighAccuracy: true, timeout: 20000 });
+    };
+
+    async function getWake() {
+        try { if ('wakeLock' in navigator && !G.wake) { G.wake = await navigator.wakeLock.request('screen'); G.wake.addEventListener('release', () => { G.wake = null; }); } } catch (e) { G.wake = null; }
+    }
+    function beginWatching() {
+        if (G.watchId != null) return;
+        getWake();
+        G.watchId = navigator.geolocation.watchPosition(onFix, err => { G.live = { err: err.code }; refreshLive(); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    }
+    function endWatching() {
+        if (G.watchId != null) { try { navigator.geolocation.clearWatch(G.watchId); } catch (e) {} G.watchId = null; }
+        if (G.wake) { try { G.wake.release(); } catch (e) {} G.wake = null; }
+    }
+    document.addEventListener('visibilitychange', () => {
+        const t = loadTrack();
+        if (!t || t.status !== 'tracking') return;
+        if (document.visibilityState === 'visible') {
+            getWake();
+            if (G.watchId == null) beginWatching();
+            const last = t.points[t.points.length - 1];
+            if (last && Date.now() - last.t > 90000) { t.gaps.push({ from: last.t, to: Date.now() }); saveTrack(); }
+            refreshLive();
+        }
+    });
+
+    function onFix(p) {
+        const t = loadTrack(); if (!t || t.status !== 'tracking') return;
+        const pt = { lat: p.coords.latitude, lng: p.coords.longitude, t: Date.now(), acc: p.coords.accuracy };
+        G.live = { pt, speed: p.coords.speed };
+        const last = t.points[t.points.length - 1];
+        if (pt.acc <= 60 && (!last || distM(last, pt) >= Math.max(4, Math.min(pt.acc * 0.5, 15)))) {
+            if (last && pt.t - last.t > 90000) t.gaps.push({ from: last.t, to: pt.t });
+            t.points.push(pt); saveTrack();
+        }
+        refreshLive();
+    }
+
+    // ---------- live ----------
+    function renderGpsLive() {
+        gpsHideMap();
+        const t = loadTrack();
+        $('gps-body').innerHTML = head('Tracking...', t.mode === 1 ? 'Mode 1 · Start + End' : 'Mode 2 · Auto End Point') + `
+        <div class="bg-slate-900 text-white rounded-3xl p-5 mb-3">
+            <div class="flex items-center gap-2 mb-3"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span><span class="text-[10px] font-black uppercase tracking-widest text-emerald-300">Recording GPS</span></div>
+            <div class="grid grid-cols-2 gap-4">
+                <div><p class="text-[9px] text-slate-400 font-bold uppercase">Distance</p><p id="gl-dist" class="text-3xl font-black">0 m</p></div>
+                <div><p class="text-[9px] text-slate-400 font-bold uppercase">Time</p><p id="gl-time" class="text-3xl font-black">0:00</p></div>
+            </div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-3 text-center">
+            <div class="bg-slate-50 rounded-2xl p-2"><p class="text-[8px] text-slate-400 font-bold uppercase">Points</p><p id="gl-pts" class="text-xs font-black text-slate-700">0</p></div>
+            <div class="bg-slate-50 rounded-2xl p-2"><p class="text-[8px] text-slate-400 font-bold uppercase">Accuracy</p><p id="gl-acc" class="text-xs font-black text-slate-700">--</p></div>
+            <div class="bg-slate-50 rounded-2xl p-2"><p class="text-[8px] text-slate-400 font-bold uppercase">${t.mode === 1 ? 'To End Point' : 'From Start'}</p><p id="gl-rem" class="text-xs font-black text-slate-700">--</p></div>
+        </div>
+        <div id="gl-warn" class="hidden mb-3 rounded-2xl p-3 text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-100"></div>
+        <div id="gps-map" class="w-full rounded-2xl overflow-hidden border border-slate-200" style="height:260px;isolation:isolate"></div>
+        <button onclick="gpsFinish()" class="w-full mt-3 py-4 rounded-2xl bg-rose-600 text-white text-sm font-black shadow-md active:scale-95"><i class="fa-solid fa-flag-checkered mr-2"></i>Finish</button>
+        <button onclick="closeGpsTrack()" class="w-full mt-2 py-3 rounded-2xl bg-slate-100 text-xs font-black text-slate-600">Keep tracking & close</button>
+        <button onclick="gpsCancel()" class="w-full mt-2 py-2 text-[11px] font-bold text-slate-400">Cancel and discard track</button>
+        ${BG_NOTE}`;
+        initMap('gps-map', false);
+        refreshLive();
+        clearInterval(G.timer); G.timer = setInterval(refreshLive, 1000);
+    }
+
+    function drawRoute(t, live) {
+        if (!G.map || !G.layer) return;
+        G.layer.clearLayers();
+        const pts = t.points.map(p => [p.lat, p.lng]);
+        if (t.plannedEnd) L.marker([t.plannedEnd.lat, t.plannedEnd.lng], { icon: pin('#e11d48', 'E') }).addTo(G.layer);
+        if (t.end) L.marker([t.end.lat, t.end.lng], { icon: pin('#e11d48', 'E') }).addTo(G.layer);
+        // route line; gaps (screen locked / no GPS) are drawn dashed
+        L.polyline(pts, { color: '#0369a1', weight: 5, opacity: .9 }).addTo(G.layer);
+        (t.gaps || []).forEach(g => {
+            const a = t.points.filter(p => p.t <= g.from).pop(), b = t.points.find(p => p.t >= g.to);
+            if (a && b) L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: '#f59e0b', weight: 4, dashArray: '6 8' }).addTo(G.layer);
+        });
+        pts.forEach(p => L.circleMarker(p, { radius: 4, color: '#fff', weight: 1.5, fillColor: '#0369a1', fillOpacity: 1 }).addTo(G.layer));
+        L.marker([t.start.lat, t.start.lng], { icon: pin('#059669', 'S') }).addTo(G.layer);
+        if (live && pts.length) {
+            const lp = pts[pts.length - 1];
+            L.circleMarker(lp, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(G.layer);
+            G.map.setView(lp, Math.max(G.map.getZoom(), 16));
+        }
+    }
+
+    function refreshLive() {
+        const t = loadTrack();
+        if (!t || t.status !== 'tracking' || !$('gl-dist')) return;
+        const last = t.points[t.points.length - 1];
+        $('gl-dist').textContent = fmtDist(trackDistance(t));
+        $('gl-time').textContent = fmtDur(trackElapsed(t));
+        $('gl-pts').textContent = t.points.length;
+        $('gl-acc').textContent = G.live && G.live.pt ? '±' + Math.round(G.live.pt.acc) + ' m' : '--';
+        const ref = last;
+        if (t.mode === 1 && t.plannedEnd) $('gl-rem').textContent = fmtDist(distM(ref, t.plannedEnd));
+        else $('gl-rem').textContent = fmtDist(distM(t.start, ref));
+        const w = $('gl-warn');
+        let msg = '';
+        if (G.live && G.live.err === 1) msg = 'Location permission was denied. Allow location access to keep recording.';
+        else if (Date.now() - last.t > 60000) msg = 'No new GPS point for over a minute. If the screen was locked, your browser may have paused GPS. Keep the app open and the screen on.';
+        w.classList.toggle('hidden', !msg); if (msg) w.textContent = tr(msg);
+        if (t.mode === 1 && t.plannedEnd && distM(ref, t.plannedEnd) < 25 && !G.arrivedAlert) { G.arrivedAlert = true; try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {} w.classList.remove('hidden'); w.textContent = tr('You have reached your End Point. Tap Finish to see your journey.'); }
+        drawRoute(t, true);
+    }
+
+    window.gpsFinish = function () {
+        const t = loadTrack(); if (!t) return;
+        const done = fix => {
+            const now = Date.now();
+            if (fix) t.points.push({ lat: fix.lat, lng: fix.lng, t: now, acc: fix.acc });
+            const lastPt = t.points[t.points.length - 1];
+            t.end = t.mode === 1 && t.plannedEnd ? { lat: t.plannedEnd.lat, lng: t.plannedEnd.lng, t: now } : { lat: lastPt.lat, lng: lastPt.lng, t: now };
+            t.endedAt = now; t.status = 'finished';
+            saveTrack(); endWatching(); G.arrivedAlert = false; renderGpsResult(); updatePill();
+        };
+        if (t.mode === 2 && navigator.geolocation) navigator.geolocation.getCurrentPosition(p => done({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }), () => done(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
+        else done(null);
+    };
+    window.gpsCancel = function () {
+        if (!confirm(tr('Discard this track? This cannot be undone.'))) return;
+        endWatching(); TRACK = null; saveTrack(); G.live = null; G.arrivedAlert = false; G.setup = { mode: G.setup.mode, start: null, end: null }; G.picking = 'start';
+        renderGpsSetup(); updatePill();
+    };
+    window.gpsNew = function () { TRACK = null; saveTrack(); G.setup = { mode: G.setup.mode, start: null, end: null }; G.picking = 'start'; renderGpsSetup(); updatePill(); };
+
+    // ---------- result ----------
+    function renderGpsResult() {
+        gpsHideMap();
+        const t = loadTrack(), dist = trackDistance(t), ms = trackElapsed(t);
+        const kmh = ms > 0 ? (dist / 1000) / (ms / 3600000) : 0;
+        $('gps-body').innerHTML = head('Journey Result', t.mode === 1 ? 'Mode 1 · Start + End' : 'Mode 2 · Auto End Point') + `
+        <div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="bg-sky-600 text-white rounded-3xl p-4"><p class="text-[9px] font-bold uppercase opacity-80">Total Distance</p><p class="text-2xl font-black">${fmtDist(dist)}</p></div>
+            <div class="bg-emerald-600 text-white rounded-3xl p-4"><p class="text-[9px] font-bold uppercase opacity-80">Elapsed Time</p><p class="text-2xl font-black">${fmtDur(ms)}</p></div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-3 text-center">
+            <div class="bg-slate-50 rounded-2xl p-2"><p class="text-[8px] text-slate-400 font-bold uppercase">GPS Points</p><p class="text-xs font-black text-slate-700">${t.points.length}</p></div>
+            <div class="bg-slate-50 rounded-2xl p-2"><p class="text-[8px] text-slate-400 font-bold uppercase">Avg Speed</p><p class="text-xs font-black text-slate-700">${kmh.toFixed(1)} km/h</p></div>
+            <div class="bg-slate-50 rounded-2xl p-2"><p class="text-[8px] text-slate-400 font-bold uppercase">Signal gaps</p><p class="text-xs font-black text-slate-700">${(t.gaps || []).length}</p></div>
+        </div>
+        <div id="gps-map" class="w-full rounded-2xl overflow-hidden border border-slate-200" style="height:340px;isolation:isolate"></div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold text-slate-500 mt-2 justify-center">
+            <span><span class="inline-block w-3 h-3 rounded-full bg-emerald-600 align-middle"></span> Start Point</span>
+            <span><span class="inline-block w-3 h-3 rounded-full bg-rose-600 align-middle"></span> End Point</span>
+            <span><span class="inline-block w-3 h-3 rounded-full bg-sky-700 align-middle"></span> GPS points &amp; route</span>
+        </div>
+        ${(t.gaps || []).length ? `<p class="text-[10px] font-semibold text-amber-700 text-center mt-2">${tr('Dashed orange lines show periods when GPS was paused (screen locked or no signal).')}</p>` : ''}
+        <button onclick="gpsExport()" class="w-full mt-3 py-3 rounded-2xl bg-slate-100 text-xs font-black text-slate-600"><i class="fa-solid fa-download mr-1"></i>Save route as GPX file</button>
+        <button onclick="gpsNew()" class="w-full mt-2 py-4 rounded-2xl bg-sky-600 text-white text-sm font-black shadow-md active:scale-95"><i class="fa-solid fa-plus mr-2"></i>New Track</button>`;
+        initMap('gps-map', false);
+        if (G.map) { drawRoute(t, false); try { G.map.fitBounds(L.latLngBounds(t.points.map(p => [p.lat, p.lng]).concat([[t.start.lat, t.start.lng], [t.end.lat, t.end.lng]])).pad(0.15)); } catch (e) {} }
+        else svgFallback(t);
+    }
+    // simple offline plot if the map library did not load
+    function svgFallback(t) {
+        const el = $('gps-map'); const all = t.points.concat([t.start, t.end]);
+        const minLa = Math.min(...all.map(p => p.lat)), maxLa = Math.max(...all.map(p => p.lat)), minLo = Math.min(...all.map(p => p.lng)), maxLo = Math.max(...all.map(p => p.lng));
+        const k = Math.cos(rad((minLa + maxLa) / 2)), W = 300, H = 300, pad = 24;
+        const sc = Math.min((W - 2 * pad) / Math.max(1e-9, (maxLo - minLo) * k), (H - 2 * pad) / Math.max(1e-9, maxLa - minLa));
+        const X = p => pad + (p.lng - minLo) * k * sc, Y = p => H - pad - (p.lat - minLa) * sc;
+        el.innerHTML = `<svg viewBox="0 0 300 300" class="w-full h-full bg-slate-50"><polyline fill="none" stroke="#0369a1" stroke-width="3" points="${t.points.map(p => X(p) + ',' + Y(p)).join(' ')}"/>
+            ${t.points.map(p => `<circle cx="${X(p)}" cy="${Y(p)}" r="2.5" fill="#0369a1"/>`).join('')}
+            <circle cx="${X(t.start)}" cy="${Y(t.start)}" r="8" fill="#059669"/><circle cx="${X(t.end)}" cy="${Y(t.end)}" r="8" fill="#e11d48"/></svg>`;
+    }
+    window.gpsExport = function () {
+        const t = loadTrack(); if (!t) return;
+        const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Visit Cambodia" xmlns="http://www.topografix.com/GPX/1/1"><wpt lat="${t.start.lat}" lon="${t.start.lng}"><name>Start</name></wpt><wpt lat="${t.end.lat}" lon="${t.end.lng}"><name>End</name></wpt><trk><name>Visit Cambodia track</name><trkseg>${t.points.map(p => `<trkpt lat="${p.lat}" lon="${p.lng}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('')}</trkseg></trk></gpx>`;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
+        a.download = 'visit-cambodia-track.gpx'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    };
+
+    // floating pill while tracking with the window closed
+    function updatePill() {
+        const t = loadTrack(); let pill = $('gps-pill');
+        const show = t && t.status === 'tracking' && $('gps-modal').classList.contains('hidden');
+        if (!show) { if (pill) pill.remove(); return; }
+        if (!pill) {
+            pill = document.createElement('button'); pill.id = 'gps-pill';
+            pill.className = 'fixed z-[1500] left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[11px] font-black px-4 py-2 rounded-full shadow-lg flex items-center gap-2';
+            pill.style.top = 'calc(env(safe-area-inset-top) + 10px)';
+            pill.onclick = () => openGpsTrack();
+            document.body.appendChild(pill);
+        }
+        pill.innerHTML = `<span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>${tr('GPS tracking')} · ${fmtDur(trackElapsed(t))}`;
+    }
+    setInterval(updatePill, 1000);
+    // resume after the app was reopened / reloaded mid-track
+    window.addEventListener('load', () => {
+        const t = loadTrack();
+        if (t && t.status === 'tracking' && navigator.geolocation) { const last = t.points[t.points.length - 1]; if (last) t.gaps.push({ from: last.t, to: Date.now() }); beginWatching(); updatePill(); }
+    });
 })();
 </script>
 </body>
