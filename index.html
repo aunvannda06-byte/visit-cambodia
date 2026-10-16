@@ -36,6 +36,7 @@
         .star-picker i:active { transform:scale(0.85); }
         .no-scrollbar::-webkit-scrollbar { display:none; }
         .no-scrollbar { -ms-overflow-style:none;scrollbar-width:none; }
+        #travel-notes-list, #travel-notes-list * { user-select:text; -webkit-user-select:text; -webkit-touch-callout:default; }
         .dropdown-content { display:none;overflow:hidden;transition:all 0.3s ease; }
         .img-indicator { position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.5);color:white;padding:4px 8px;border-radius:10px;font-size:10px;backdrop-filter:blur(5px);display:flex;align-items:center;gap:4px; }
         .modal-animate { animation:slideUp 0.3s cubic-bezier(0.4,0,0.2,1); }
@@ -114,6 +115,12 @@
         /* Home: Nearby places in two rows, swipe sideways for more */
         .nearby-scroll { display:grid; grid-auto-flow:column; grid-template-rows:repeat(3,auto); grid-auto-columns:88%; gap:12px; overflow-x:auto; padding-bottom:8px; scroll-snap-type:x mandatory; -ms-overflow-style:none; scrollbar-width:none; }
         .nearby-scroll::-webkit-scrollbar { display:none; }
+        /* Home: Explore by Destination + Categories show 2 rows and swipe sideways */
+        .two-row-scroll { display:grid; grid-auto-flow:column; grid-template-rows:repeat(2,auto); gap:12px; overflow-x:auto; }
+        .two-row-scroll > * { min-width:0; }
+        .two-row-scroll.dest-scroll { grid-auto-columns:10rem; }
+        .two-row-scroll.cat-scroll { grid-auto-columns:12rem; gap:16px; }
+        .two-row-scroll.cat-scroll > p { grid-column:1 / -1; grid-row:1; }
         .nearby-scroll > * { scroll-snap-align:start; margin:0 !important; min-width:0; }
         /* Home: category filter chips in two rows, swipe sideways for more */
         .chip-scroll { display:grid; grid-auto-flow:column; grid-template-rows:repeat(2,2.1rem); grid-auto-columns:calc(50% - 4px); gap:6px 8px; height:5.2rem; overflow-x:auto; overflow-y:hidden; scroll-snap-type:x proximity; }
@@ -2399,13 +2406,14 @@ function renderHome(container) {
         </div>
         <div class="mb-8">
             <h3 class="text-sm font-bold text-slate-800 mb-4">Explore by Destination</h3>
-            <div class="flex overflow-x-auto gap-3 no-scrollbar pb-3">
+            <div class="two-row-scroll dest-scroll no-scrollbar pb-3">
                 ${destinationList().map(prov => { const photo = destinationPhoto(prov); return `
-                <div onclick="openDestination('${prov}')" class="w-40 flex-shrink-0 bg-white rounded-[22px] overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:scale-95 transition-all">
+                <div onclick="openDestination('${prov}')" class="bg-white rounded-[22px] overflow-hidden shadow-sm border border-slate-100 cursor-pointer active:scale-95 transition-all">
                     <div class="h-28 bg-gradient-to-br from-sky-200 to-sky-100">${photo ? `<img src="${photo}" loading="lazy" class="w-full h-full object-cover">` : ''}</div>
                     <div class="px-3 py-3 flex items-center gap-2"><i class="fa-solid fa-location-dot text-sky-700 text-sm"></i><span class="text-[12px] font-bold text-slate-800 truncate">${prov}</span></div>
                 </div>`; }).join('')}
             </div>
+            <p class="text-[11px] text-sky-700 font-bold text-center mb-2 flex items-center justify-center gap-2">Swipe right to see more <i class="fa-solid fa-arrow-right"></i></p>
             <button onclick="openDestination('All')" class="w-full h-12 mt-2 bg-sky-50 text-sky-700 rounded-2xl font-black text-[12px] flex items-center justify-center gap-2 border border-sky-100 active:scale-95 transition-all">Explore All <i class="fa-solid fa-arrow-right text-[11px]"></i></button>
         </div>
         </div></div>
@@ -2420,7 +2428,8 @@ function renderHome(container) {
                         <span class="text-[10px] font-bold ${iconFilter===item.id?'text-sky-700':'text-slate-600'} text-center leading-tight">${escHtml(item.label)}</span>
                     </div>`).join('')}
             </div>
-            <div class="flex overflow-x-auto gap-4 no-scrollbar pb-6">${renderIconSlider()}</div>
+            <div class="two-row-scroll cat-scroll no-scrollbar pb-2">${renderIconSlider()}</div>
+            <p class="text-[11px] text-sky-700 font-bold text-center mb-6 flex items-center justify-center gap-2">Swipe right to see more <i class="fa-solid fa-arrow-right"></i></p>
         </div>
     `;
 }
@@ -2467,7 +2476,7 @@ function renderIconSlider() {
     const data=getDailyIconSliderLocations(iconFilter);
     if(data.length===0) return '<p class="text-[10px] text-slate-300 w-full text-center py-5 italic">No content found</p>';
     return data.map(l=>`
-        <div onclick="openDetails('${l.name}')" class="w-48 flex-shrink-0 bg-white rounded-[28px] overflow-hidden shadow-sm border border-slate-100">
+        <div onclick="openDetails('${l.name}')" class="bg-white rounded-[28px] overflow-hidden shadow-sm border border-slate-100">
             <div class="relative h-32">
                 <img src="${l.photos[0]}" class="w-full h-full object-cover">
                 ${getLocationViews(l.name) > 0 ? `<div class="absolute top-2 right-2 bg-black/50 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5 backdrop-blur"><i class="fa-solid fa-eye" style="font-size:7px"></i>${formatNum(getLocationViews(l.name))}</div>` : ''}
@@ -4450,29 +4459,55 @@ function renderAIGuide(container) {
 function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+let _aiNameRe = null, _aiNameCount = -1;
+function aiPlaceRegex() {
+    // Place names from the Explore data (full name, Khmer part and English part), longest first, so they can be shown in bold
+    if (_aiNameRe && _aiNameCount === LOCATIONS.length) return _aiNameRe;
+    const set = new Set();
+    LOCATIONS.forEach(l => {
+        const n = String(l.name || '').trim();
+        if (n.length >= 4) set.add(n);
+        n.split(/\s+-\s+/).forEach(x => { x = x.trim(); if (x.length >= 4) set.add(x); });
+    });
+    const list = Array.from(set).map(x => escapeHtml(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((x, y) => y.length - x.length);
+    _aiNameCount = LOCATIONS.length;
+    _aiNameRe = list.length ? new RegExp('(' + list.join('|') + ')', 'g') : null;
+    return _aiNameRe;
+}
+function aiBoldPlaces(html) {
+    const re = aiPlaceRegex(); if (!re) return html;
+    // leave text that is already inside <strong> alone
+    return html.split(/(<strong>[\s\S]*?<\/strong>)/).map((part, i) => i % 2 ? part : part.replace(re, '<strong>$1</strong>')).join('');
+}
 function formatAIReply(text) {
-    // Turns the AI's reply into tidy paragraphs / bullet lists / numbered lists / bold - never raw * or # symbols.
+    // Turns the AI's reply into: proper headers, bullet / numbered lists, and bold place names + key points. Never shows raw * or # symbols.
     let t = escapeHtml(text).replace(/\r/g, '');
     t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong>$1</strong>')
          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
          .replace(/__(.+?)__/g, '<strong>$1</strong>')
          .replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,!?:;]|$)/gm, '$1<em>$2</em>');
+    const head = h => '<div class="ai-h" style="font-weight:900;font-size:14.5px;color:#075985;margin:12px 0 4px;padding-bottom:3px;border-bottom:2px solid #e0f2fe">' + h + '</div>';
+    // "Key point: explanation" -> bold the key point
+    const keyPoint = c => { const m = c.match(/^(?!<strong>)([^:<]{2,60}):(\s.+)$/); return m ? '<strong>' + m[1] + ':</strong>' + m[2] : c; };
     let out = '', list = null;
     const close = () => { if (list) { out += '</' + list + '>'; list = null; } };
     t.split('\n').forEach(raw => {
         const ln = raw.trim();
         let m;
         if (!ln) { close(); out += '<div style="height:6px"></div>'; return; }
-        if ((m = ln.match(/^#{1,6}\s+(.+)$/))) { close(); out += '<div class="font-black text-slate-800" style="margin-top:6px">' + m[1] + '</div>'; return; }
+        if ((m = ln.match(/^#{1,6}\s+(.+)$/))) { close(); out += head(m[1].replace(/<\/?strong>/g, '')); return; }
+        if ((m = ln.match(/^<strong>([^<]{2,80})<\/strong>:?$/))) { close(); out += head(m[1].replace(/:$/, '')); return; }
         if ((m = ln.match(/^[-*•]\s+(.+)$/))) {
             if (list !== 'ul') { close(); out += '<ul style="list-style:disc;padding-left:18px;margin:4px 0">'; list = 'ul'; }
-            out += '<li>' + m[1] + '</li>'; return;
+            out += '<li style="margin:2px 0">' + aiBoldPlaces(keyPoint(m[1])) + '</li>'; return;
         }
         if ((m = ln.match(/^(\d+)[.)]\s+(.+)$/))) {
             if (list !== 'ol') { close(); out += '<ol style="list-style:decimal;padding-left:20px;margin:4px 0">'; list = 'ol'; }
-            out += '<li>' + m[2] + '</li>'; return;
+            out += '<li style="margin:2px 0">' + aiBoldPlaces(keyPoint(m[2])) + '</li>'; return;
         }
-        close(); out += '<div>' + ln + '</div>';
+        // a short line ending with ":" on its own is a section title
+        if (/^[^<]{2,80}:$/.test(ln) && !/[.!?]:$/.test(ln)) { close(); out += head(ln.slice(0, -1)); return; }
+        close(); out += '<div>' + aiBoldPlaces(ln) + '</div>';
     });
     close();
     return out.replace(/\*/g, '').replace(/`/g, '');
@@ -5409,6 +5444,15 @@ window.onload = function() {
 
         // ---------- Header, tab bar, tagline ----------
     add([
+        ["Google Maps link", "តំណ Google Maps", "谷歌地图链接"],
+        ["Open in Google Maps", "បើកក្នុង Google Maps", "在谷歌地图中打开"],
+        ["Copy link", "ចម្លងតំណ", "复制链接"],
+        ["Copied!", "បានចម្លង!", "已复制！"],
+        ["Copy this link", "ចម្លងតំណនេះ", "复制此链接"],
+        ["Fitting route to the real roads...", "កំពុងតម្រឹមផ្លូវតាមផ្លូវជាក់ស្តែង...", "正在将路线匹配到实际道路..."],
+        ["Route follows the real roads. Dots are your GPS points.", "ផ្លូវតាមផ្លូវជាក់ស្តែង។ ចំណុចគឺជាចំណុច GPS របស់អ្នក។", "路线沿实际道路，圆点为你的 GPS 点。"],
+        ["Showing your GPS path (road matching unavailable).", "បង្ហាញផ្លូវ GPS របស់អ្នក (មិនអាចតម្រឹមតាមផ្លូវបាន)។", "显示你的 GPS 路径（无法匹配道路）。"],
+        ["Swipe right to see more", "អូសទៅស្តាំដើម្បីមើលបន្ថែម", "向右滑动查看更多"],
         ["Digital Compass", "ត្រីវិស័យឌីជីថល", "数字指南针"],
         ["Compass", "ត្រីវិស័យ", "指南针"],
         ["GPS Tracking", "តាមដាន GPS", "GPS 追踪"],
@@ -6644,8 +6688,8 @@ window.onload = function() {
         const el = $(id);
         if (!hasLeaflet()) { el.innerHTML = `<div class="h-full flex items-center justify-center text-center p-4 text-[11px] font-bold text-slate-400">${tr('Map could not load. Check your internet connection.')}</div>`; return; }
         const ref = (typeof userPos !== 'undefined' && userPos) ? [userPos.lat, userPos.lng] : [12.5657, 104.991];
-        G.map = L.map(id, { zoomControl: true }).setView(ref, (typeof userPos !== 'undefined' && userPos) ? 15 : 7);
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(G.map);
+        G.map = L.map(id, { zoomControl: true, attributionControl: false }).setView(ref, (typeof userPos !== 'undefined' && userPos) ? 15 : 7);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(G.map);
         G.layer = L.layerGroup().addTo(G.map);
         if (clickable) G.map.on('click', e => {
             G.setup[G.picking] = { lat: e.latlng.lat, lng: e.latlng.lng };
@@ -6764,8 +6808,9 @@ window.onload = function() {
         if (t.plannedEnd) L.marker([t.plannedEnd.lat, t.plannedEnd.lng], { icon: pin('#e11d48', 'E') }).addTo(G.layer);
         if (t.end) L.marker([t.end.lat, t.end.lng], { icon: pin('#e11d48', 'E') }).addTo(G.layer);
         // route line; gaps (screen locked / no GPS) are drawn dashed
-        L.polyline(pts, { color: '#0369a1', weight: 5, opacity: .9 }).addTo(G.layer);
-        (t.gaps || []).forEach(g => {
+        if (t.snapped && t.snapped.length > 1) L.polyline(t.snapped, { color: '#0369a1', weight: 6, opacity: .9, lineJoin: 'round' }).addTo(G.layer);
+        else L.polyline(pts, { color: '#0369a1', weight: 5, opacity: .9 }).addTo(G.layer);
+        if (!(t.snapped && t.snapped.length > 1)) (t.gaps || []).forEach(g => {
             const a = t.points.filter(p => p.t <= g.from).pop(), b = t.points.find(p => p.t >= g.to);
             if (a && b) L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: '#f59e0b', weight: 4, dashArray: '6 8' }).addTo(G.layer);
         });
@@ -6839,13 +6884,54 @@ window.onload = function() {
             <span><span class="inline-block w-3 h-3 rounded-full bg-rose-600 align-middle"></span> End Point</span>
             <span><span class="inline-block w-3 h-3 rounded-full bg-sky-700 align-middle"></span> GPS points &amp; route</span>
         </div>
-        ${(t.gaps || []).length ? `<p class="text-[10px] font-semibold text-amber-700 text-center mt-2">${tr('Dashed orange lines show periods when GPS was paused (screen locked or no signal).')}</p>` : ''}
-        <button onclick="gpsExport()" class="w-full mt-3 py-3 rounded-2xl bg-slate-100 text-xs font-black text-slate-600"><i class="fa-solid fa-download mr-1"></i>Save route as GPX file</button>
+        <p id="gps-snap-note" class="text-[10px] font-semibold text-slate-400 text-center mt-2">${tr('Fitting route to the real roads...')}</p>
+        <div class="mt-3 bg-slate-50 border border-slate-100 rounded-2xl p-3">
+            <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Google Maps link</p>
+            <a href="${escHtml(gmapsLink(t))}" target="_blank" rel="noopener" class="block text-[11px] font-bold text-sky-700 break-all underline" style="user-select:text;-webkit-user-select:text">${escHtml(gmapsLink(t))}</a>
+            <div class="flex gap-2 mt-2">
+                <a href="${escHtml(gmapsLink(t))}" target="_blank" rel="noopener" class="flex-1 py-2.5 rounded-xl bg-sky-600 text-white text-[11px] font-black text-center"><i class="fa-solid fa-map-location-dot mr-1"></i>Open in Google Maps</a>
+                <button onclick="gpsCopyLink()" class="flex-1 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 text-[11px] font-black"><i class="fa-regular fa-copy mr-1"></i><span id="gps-copy-lbl">Copy link</span></button>
+            </div>
+        </div>
         <button onclick="gpsNew()" class="w-full mt-2 py-4 rounded-2xl bg-sky-600 text-white text-sm font-black shadow-md active:scale-95"><i class="fa-solid fa-plus mr-2"></i>New Track</button>`;
         initMap('gps-map', false);
-        if (G.map) { drawRoute(t, false); try { G.map.fitBounds(L.latLngBounds(t.points.map(p => [p.lat, p.lng]).concat([[t.start.lat, t.start.lng], [t.end.lat, t.end.lng]])).pad(0.15)); } catch (e) {} }
-        else svgFallback(t);
+        const fit = () => { if (G.map) { drawRoute(t, false); try { G.map.fitBounds(L.latLngBounds((t.snapped && t.snapped.length ? t.snapped : t.points.map(p => [p.lat, p.lng])).concat([[t.start.lat, t.start.lng], [t.end.lat, t.end.lng]])).pad(0.15)); } catch (e) {} } else svgFallback(t); };
+        fit();
+        const note = () => { const n = $('gps-snap-note'); if (n) n.textContent = t.snapped && t.snapped.length ? tr('Route follows the real roads. Dots are your GPS points.') : tr('Showing your GPS path (road matching unavailable).'); };
+        if (t.snapped) note();
+        else snapToRoads(t).then(r => { t.snapped = r || []; saveTrack(); if (TRACK === t && $('gps-map')) { fit(); note(); } });
     }
+    // Snap the GPS points to real roads with the OSRM map-matching service (free, needs internet)
+    async function snapToRoads(t) {
+        try {
+            let pts = t.points.slice();
+            if (pts.length < 2) return null;
+            const MAX = 90;
+            if (pts.length > MAX) { const o = []; for (let i = 0; i < MAX; i++) o.push(pts[Math.round(i * (pts.length - 1) / (MAX - 1))]); pts = o; }
+            const coords = pts.map(p => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join(';');
+            const rad = pts.map(p => Math.min(50, Math.max(15, Math.round(p.acc || 25)))).join(';');
+            const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 12000);
+            const r = await fetch('https://router.project-osrm.org/match/v1/driving/' + coords + '?geometries=geojson&overview=full&gaps=ignore&tidy=true&radiuses=' + rad, { signal: ctl.signal });
+            clearTimeout(to);
+            const j = await r.json();
+            if (j.code !== 'Ok' || !j.matchings || !j.matchings.length) return null;
+            const line = []; j.matchings.forEach(m => m.geometry.coordinates.forEach(c => line.push([c[1], c[0]])));
+            return line.length > 1 ? line : null;
+        } catch (e) { return null; }
+    }
+    // Google Maps directions link: Start -> (a few points on the way) -> End, so it follows the same roads
+    function gmapsLink(t) {
+        const f = p => p.lat.toFixed(6) + ',' + p.lng.toFixed(6);
+        const mid = t.points.slice(1, -1), n = Math.min(8, mid.length), way = [];
+        for (let i = 0; i < n; i++) way.push(f(mid[Math.round((i + 0.5) * mid.length / n - 0.5)]));
+        return 'https://www.google.com/maps/dir/?api=1&origin=' + f(t.start) + '&destination=' + f(t.end) + (way.length ? '&waypoints=' + way.join('%7C') : '') + '&travelmode=driving';
+    }
+    window.gpsCopyLink = function () {
+        const t = loadTrack(); if (!t) return; const link = gmapsLink(t);
+        const done = () => { const l = $('gps-copy-lbl'); if (l) { l.textContent = tr('Copied!'); setTimeout(() => { l.textContent = tr('Copy link'); }, 1500); } };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, () => prompt(tr('Copy this link'), link));
+        else { const ta = document.createElement('textarea'); ta.value = link; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { prompt(tr('Copy this link'), link); } ta.remove(); }
+    };
     // simple offline plot if the map library did not load
     function svgFallback(t) {
         const el = $('gps-map'); const all = t.points.concat([t.start, t.end]);
@@ -6857,14 +6943,6 @@ window.onload = function() {
             ${t.points.map(p => `<circle cx="${X(p)}" cy="${Y(p)}" r="2.5" fill="#0369a1"/>`).join('')}
             <circle cx="${X(t.start)}" cy="${Y(t.start)}" r="8" fill="#059669"/><circle cx="${X(t.end)}" cy="${Y(t.end)}" r="8" fill="#e11d48"/></svg>`;
     }
-    window.gpsExport = function () {
-        const t = loadTrack(); if (!t) return;
-        const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Visit Cambodia" xmlns="http://www.topografix.com/GPX/1/1"><wpt lat="${t.start.lat}" lon="${t.start.lng}"><name>Start</name></wpt><wpt lat="${t.end.lat}" lon="${t.end.lng}"><name>End</name></wpt><trk><name>Visit Cambodia track</name><trkseg>${t.points.map(p => `<trkpt lat="${p.lat}" lon="${p.lng}"><time>${new Date(p.t).toISOString()}</time></trkpt>`).join('')}</trkseg></trk></gpx>`;
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
-        a.download = 'visit-cambodia-track.gpx'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-    };
-
     // floating pill while tracking with the window closed
     function updatePill() {
         const t = loadTrack(); let pill = $('gps-pill');
